@@ -1,6 +1,6 @@
 package gov.pnnl.gridappsd.cimhub.components;
 //	----------------------------------------------------------
-//	Copyright (c) 2017, Battelle Memorial Institute
+//	Copyright (c) 2017-2022, Battelle Memorial Institute
 //	All rights reserved.
 //	----------------------------------------------------------
 
@@ -12,6 +12,8 @@ public class DistSwitch extends DistComponent {
 	public String name;
 	public String bus1;
 	public String bus2;
+  public String t1id;
+  public String t2id;
 	public String phases;
 	public boolean open;
 	public double basev;
@@ -56,7 +58,10 @@ public class DistSwitch extends DistComponent {
 			breaking = OptionalDouble (soln, "?breaking", 0.0);
 			bus1 = SafeName (soln.get("?bus1").toString()); 
 			bus2 = SafeName (soln.get("?bus2").toString()); 
+      t1id = soln.get("?t1id").toString();
+      t2id = soln.get("?t2id").toString();
 			phases = OptionalString (soln, "?phases", "ABC");
+      phases = phases.replace ('\n', ':');
 			open = Boolean.parseBoolean (soln.get("?open").toString());
 			StringBuilder glm_phs = new StringBuilder ();
 			if (phases.contains("A")) glm_phs.append("A");
@@ -129,7 +134,7 @@ public class DistSwitch extends DistComponent {
 
 		buf.append (" phases=" + Integer.toString(DSSPhaseCount(phases, false)) + 
 								" bus1=" + DSSBusPhases(bus1, phases) + " bus2=" + DSSBusPhases (bus2, phases) + 
-								" switch=y // CIM " + CIMClass() + "\n");
+								" switch=y r1=1e-4 r0=1e-4 x1=0 x0=0 c1=0 c0=0 // CIM " + CIMClass() + "\n");
 		AppendDSSRatings (buf, normalCurrentLimit, emergencyCurrentLimit);
 		if (open) {
 			buf.append ("  open Line." + name + " 1\n");

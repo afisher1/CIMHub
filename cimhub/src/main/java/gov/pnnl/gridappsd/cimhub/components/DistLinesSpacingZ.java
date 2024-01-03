@@ -1,6 +1,6 @@
 package gov.pnnl.gridappsd.cimhub.components;
 //	----------------------------------------------------------
-//	Copyright (c) 2017-2019, Battelle Memorial Institute
+//	Copyright (c) 2017-2022, Battelle Memorial Institute
 //	All rights reserved.
 //	----------------------------------------------------------
 
@@ -16,6 +16,8 @@ public class DistLinesSpacingZ extends DistLineSegment {
 	public String[] wire_classes;
 
 	public String glm_config;
+
+  private boolean bSpacingHasNeutral = false;
 
 	public String GetJSONEntry () {
 		StringBuilder buf = new StringBuilder ();
@@ -34,6 +36,8 @@ public class DistLinesSpacingZ extends DistLineSegment {
 			bus1 = SafeName (soln.get("?bus1").toString()); 
 			bus2 = SafeName (soln.get("?bus2").toString()); 
 			len = Double.parseDouble (soln.get("?len").toString());
+      t1id = soln.get("?t1id").toString();
+      t2id = soln.get("?t2id").toString();
 			basev = Double.parseDouble (soln.get("?basev").toString());
 			spacing = soln.get("?spacing").toString();
 			spcid = soln.get("?spcid").toString();
@@ -48,7 +52,9 @@ public class DistLinesSpacingZ extends DistLineSegment {
 				wire_names[i] = soln.get("?phname").toString();
 				if (wire_phases[i].equals("N") == false) {
 					buf.append (wire_phases[i]);
-				}
+				} else {
+          bSpacingHasNeutral = true;
+        }
 				if ((i + 1) < nwires) {
 					soln = results.next();
 				}
@@ -68,7 +74,7 @@ public class DistLinesSpacingZ extends DistLineSegment {
 	}
 
 	public String GetGLM() {
-    boolean bForceN = false;
+    boolean bForceN = bSpacingHasNeutral;
 		StringBuilder buf = new StringBuilder ();
 		if (wire_classes[0].equals("OverheadWireInfo")) {
 			bCable = false;

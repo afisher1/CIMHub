@@ -10,8 +10,10 @@ services:
       - 8889:8080
 
   hub:
-    image: gridappsd/cimhub:0.0.1
+    image: gridappsd/cimhub:0.0.4
     stdin_open: true
     tty: true
     depends_on:
       - blazegraph
+    volumes:
+      - ../Powergrid-Models/platform:/platform

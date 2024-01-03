@@ -1,6 +1,6 @@
 package gov.pnnl.gridappsd.cimhub.components;
 //	----------------------------------------------------------
-//	Copyright (c) 2017, Battelle Memorial Institute
+//	Copyright (c) 2017-2022, Battelle Memorial Institute
 //	All rights reserved.
 //	----------------------------------------------------------
 
@@ -10,6 +10,7 @@ public class DistLoad extends DistComponent {
 	public String id;
 	public String name;
 	public String bus;
+  public String t1id;
 	public String phases;
 	public String conn;
 	public double basev;
@@ -44,6 +45,7 @@ public class DistLoad extends DistComponent {
 			name = SafeName (soln.get("?name").toString());
 			id = soln.get("?id").toString();
 			bus = SafeName (soln.get("?bus").toString());
+      t1id = soln.get("?t1id").toString();
 			basev = Double.parseDouble (soln.get("?basev").toString());
 			phases = OptionalString (soln, "?phases", "ABC");
 			phases = phases.replace ('\n', ':');
@@ -75,6 +77,11 @@ public class DistLoad extends DistComponent {
 	}
 
 	private void SetDSSLoadModel() {
+    if (conn.equals("D")) {
+      bDelta = true;
+    } else {
+      bDelta = false;
+    }
 		if (pe == 1 && qe == 2) {
 			dss_load_model = 4;
 			return;
@@ -96,16 +103,11 @@ public class DistLoad extends DistComponent {
 		} else {
 			dss_load_model = 8;
 		}
-		if (conn.equals("D")) {
-			bDelta = true;
-		} else {
-			bDelta = false;
-		}
 	}
 
 	private String GetZIPV() {
 		return "[" + df4.format(pz) + "," + df4.format(pi) + "," + df4.format(pp) + "," + df4.format(qz)
-		 + "," + df4.format(qi) + "," + df4.format(pp) + ",0.8]";
+		 + "," + df4.format(qi) + "," + df4.format(qp) + ",0.8]";
 	}
 
 	public String GetDSS() {
@@ -114,8 +116,14 @@ public class DistLoad extends DistComponent {
 		SetDSSLoadModel();
 		int nphases = DSSPhaseCount(phases, bDelta);
 		double kv = 0.001 * basev;
-		if (nphases < 2 && !bDelta) { // 2-phase wye load should be line-line for secondary?
-			kv /= Math.sqrt(3.0);
+		if (nphases < 2 && !bDelta) { 
+      if (kv < 0.22) {
+        kv /= Math.sqrt(3.0);
+      } else if (kv < 0.26) {// TODO: this catches the 240-volt windings with center tap?
+        kv /= 2.0;
+      } else {
+        kv /= Math.sqrt(3.0);
+      }
 		}
 
 		buf.append (" phases=" + Integer.toString(nphases) + " bus1=" + DSSShuntPhases (bus, phases, bDelta) + 

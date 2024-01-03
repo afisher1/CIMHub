@@ -1,6 +1,6 @@
 package gov.pnnl.gridappsd.cimhub.components;
 //	----------------------------------------------------------
-//	Copyright (c) 2017, Battelle Memorial Institute
+//	Copyright (c) 2017-2022, Battelle Memorial Institute
 //	All rights reserved.
 //	----------------------------------------------------------
 
@@ -12,6 +12,8 @@ public abstract class DistLineSegment extends DistComponent {
 	public String name;
 	public String bus1;
 	public String bus2;
+  public String t1id;
+  public String t2id;
 	public String phases;
 	public double len;
 	public double basev;
@@ -43,10 +45,7 @@ public abstract class DistLineSegment extends DistComponent {
 
 		buf.append ("  from \"" + bus1 + "\";\n");
 		buf.append ("  to \"" + bus2 + "\";\n");
-		StringBuilder phs = new StringBuilder();
-		if (phases.contains ("A")) phs.append ("A");
-		if (phases.contains ("B")) phs.append ("B");
-		if (phases.contains ("C")) phs.append ("C");
+		StringBuilder phs = new StringBuilder(phases.replace (":", "").replace("s1", "").replace("s2", ""));
 		if (bTriplex) phs.append ("S");
 		if (phases.contains ("N") || bForceN) phs.append ("N");
 		glm_phases = phs.toString();

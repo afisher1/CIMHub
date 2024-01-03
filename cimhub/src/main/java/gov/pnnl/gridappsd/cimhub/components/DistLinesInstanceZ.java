@@ -1,6 +1,6 @@
 package gov.pnnl.gridappsd.cimhub.components;
 //	----------------------------------------------------------
-//	Copyright (c) 2017, Battelle Memorial Institute
+//	Copyright (c) 2017-2022, Battelle Memorial Institute
 //	All rights reserved.
 //	----------------------------------------------------------
 
@@ -32,6 +32,8 @@ public class DistLinesInstanceZ extends DistLineSegment {
 			id = soln.get("?id").toString();
 			bus1 = SafeName (soln.get("?bus1").toString()); 
 			bus2 = SafeName (soln.get("?bus2").toString()); 
+      t1id = soln.get("?t1id").toString();
+      t2id = soln.get("?t2id").toString();
 			phases = "ABC";
 			len = Double.parseDouble (soln.get("?len").toString());
 			basev = Double.parseDouble (soln.get("?basev").toString());
@@ -54,12 +56,14 @@ public class DistLinesInstanceZ extends DistLineSegment {
 
 	public String GetGLM() {
 		StringBuilder buf = new StringBuilder ();
-		AppendSharedGLMAttributes (buf, name, false, false);
+		AppendSharedGLMAttributes (buf, name, false, false);  // writes length in ft
 
-		String seqZs = CFormat (new Complex ((r0 + 2.0 * r1) / 3.0, (x0 + 2.0 * x1) / 3.0));
-		String seqZm = CFormat (new Complex ((r0 - r1) / 3.0, (x0 - x1) / 3.0));
-		String seqCs = df4.format(1.0e9 * (b0 + 2.0 * b1) / 3.0 / gOMEGA);
-		String seqCm = df4.format(1.0e9 * (b0 - b1) / 3.0 / gOMEGA);
+    // should be per mile
+    double k = gMperMILE;
+		String seqZs = CFormat (new Complex (k * (r0 + 2.0 * r1) / 3.0, k * (x0 + 2.0 * x1) / 3.0));
+		String seqZm = CFormat (new Complex (k * (r0 - r1) / 3.0, k * (x0 - x1) / 3.0));
+		String seqCs = df4.format(k * 1.0e9 * (b0 + 2.0 * b1) / 3.0 / gOMEGA);
+		String seqCm = df4.format(k * 1.0e9 * (b0 - b1) / 3.0 / gOMEGA);
 
 		buf.append ("object line_configuration {\n");
 		buf.append ("  name \"lcon_" + name + "_ABC\";\n");
