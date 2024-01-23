@@ -13,6 +13,7 @@ Created on Tue Jan  10 13:34:29 2023
 #   from lxml import etree
 #   from lxml.etree import Element, ElementTree, QName
 
+from argparse import ArgumentParser
 import uuid
 import os
 import re
@@ -80,11 +81,11 @@ basevoltage_template = """<cim:BaseVoltage rdf:about="urn:uuid:{mRID}">
 """
 
 # Not using TopologicalNode or OperationalLimitSet attributes.
-# The original bus numbers were unique, so use those as name,
-#   put the text name and kv into an optional description attribute
+# Put bus number in aliasName
 bus_template = """<cim:ConnectivityNode rdf:about="urn:uuid:{mRID}">
     <cim:IdentifiedObject.mRID>{mRID}</cim:IdentifiedObject.mRID>
     <cim:IdentifiedObject.name>{name}</cim:IdentifiedObject.name>
+    <cim:IdentifiedObject.aliasName>{aliasName}</cim:IdentifiedObject.aliasName>
     <cim:IdentifiedObject.description>{desc}</cim:IdentifiedObject.description>
     <cim:ConnectivityNode.ConnectivityNodeContainer rdf:resource="urn:uuid:{contID}"/>
 </cim:ConnectivityNode>
@@ -506,22 +507,39 @@ wtgaa_template = """<cim:WeccWTGAA rdf:about="urn:uuid:{mRID}">
 </cim:WeccWTGAA>
 """
 
+# Substation Model
+Substation_template = """<cim:Substation rdf:about="urn:uuid:{mRID}">
+    <cim:IdentifiedObject.mRID>{mRID}</cim:IdentifiedObject.mRID>
+    <cim:IdentifiedObject.name>{name}</cim:IdentifiedObject.name>
+    <cim:IdentifiedObject.description>{containerdesc}</cim:IdentifiedObject.description>
+</cim:Substation>
+"""
+
+# Substation Model
+voltage_level_template = """<cim:VoltageLevel rdf:about="urn:uuid:{mRID}">
+    <cim:IdentifiedObject.mRID>{mRID}</cim:IdentifiedObject.mRID>
+    <cim:IdentifiedObject.name>{name}</cim:IdentifiedObject.name>
+    <cim:VoltageLevel.BaseVoltage rdf:resource="urn:uuid:{bvID}"/>
+    <cim:VoltageLevel.Substation rdf:resource="urn:uuid:{substationID}"/>
+</cim:VoltageLevel>
+"""
 #%%
-def convertRawtoCIM(workpath, xmlname, addon_fueltype, cimname, fuidname, containername, containerdesc):
-    
-    fuidname = workpath+fuidname
-    xmlname = workpath+xmlname
-    cimname = workpath+cimname
-    addon_fueltype = workpath+addon_fueltype
+
+def convertRawtoCIM(psse_xml_file: str, cim_xml_file: str, cim_mrid_file: str, cim_container_name: str, fuel_addon_file = None):
+
+
     addon_exist = False
-    if os.path.exists(addon_fueltype):
-        addon_exist = True
+    if fuel_addon_file is not None:
+        if os.path.exists(fuel_addon_file):
+            addon_exist = True
 
     # The general approach is to read raw XML into Python dictionaries,
     #   which may be cross-referenced by key.
     # Then we can write out CIM XML by traversing the dictionaries.
+    BaseVoltages = {}
     VoltageLevels = {}
     Buses = {}
+    Substations = {}
     Branches = {}
     Loads = {}
     Transformers = {}
@@ -529,52 +547,65 @@ def convertRawtoCIM(workpath, xmlname, addon_fueltype, cimname, fuidname, contai
     FixedShunts = {}
     Generators = {}
     
-    tree = et.parse(xmlname)
+    tree = et.parse(psse_xml_file)
     root = tree.getroot()
 
     #%% fuel type for generator 
     if addon_exist:
-        fueltype = pd.read_excel(addon_fueltype, index_col=None, header=1)
+        fueltype = pd.read_excel(fuel_addon_file, index_col=None, header=1)
         k_gen = 0
     
     for child in root:
+        if child.tag == 'CASEDATA':
+            sbase = float(child.find('SBASE').text.strip())
+            psse_version = int(child.find('REV').text.strip())
+            transformer_ratings_units = int(child.find('XFRRAT').text.strip())
+            non_transformer_ratings_units = int(child.find('NXFRAT').text.strip())
+            base_frequency = float(child.find('BASFRQ').text.strip())
         if child.tag == 'BUSDATA':
-            busname = child.find('BusName').text.strip()
-            busnum = int(child.find('BusNo').text.strip())
-            buskv = float(child.find('NormKV').text.strip())
+            busname = child.find('NAME').text.strip()
+            busnum = int(child.find('I').text.strip())
+            buskv = float(child.find('BASKV').text.strip())
             # The most convenient key, for lookups, is probably busnum.
             # Buses[busnum] = {'Name':busname, 'kV': buskv}
             vlevel = 'BV_{:.2f}'.format(buskv)
             Buses[busnum] = {'Name':busname, 'kV': buskv, 'VoltageLevel': vlevel}
             if vlevel not in VoltageLevels:
                 VoltageLevels[vlevel] = {'kV': buskv}
+            if vlevel not in BaseVoltages:
+                BaseVoltages[vlevel] = {'kV': buskv}
+            Substations[busnum] = {'Name':f"substation_{busname if busname else busnum}", 'kV': buskv, 'VoltageLevel': vlevel}
             # print ('{:5d} {:12s} {:7.3f}'.format(busnum, busname, buskv))
         elif child.tag == 'BRANCHDATA':
             bus1 = int(child.find('I').text.strip())
             bus2 = int(child.find('J').text.strip())
-            ckt = int(child.find('CKT').text.strip())
-            # stat = int(child.find('STAT').text.strip())
-            stat = 1 #TODO: user can load from raw data instead
+            ckt = child.find('CKT').text.strip()
+            if psse_version == 33:
+                stat = 1
+                key = '{:d}_{:d}_{:s}'.format(bus1, bus2, ckt)
+            elif psse_version == 34:
+                stat = int(child.find('STAT').text.strip())
+                key = child.find('NAME').text
+                if key is None:
+                    key = '{:d}_{:d}_{:s}'.format(bus1, bus2, ckt)
             r = float(child.find('R').text.strip())
             x = float(child.find('X').text.strip())
             b = float(child.find('B').text.strip())
-            # l = float(child.find('LEN').text.strip())
-            l = 0.0 #TODO: user can load from raw data instead
-            key = '{:d}_{:d}_{:d}'.format(bus1, bus2, ckt)
+            l = float(child.find('LEN').text.strip())
             Branches[key] = {'bus1': bus1, 'bus2': bus2, 'ckt':ckt, 'r':r, 'x':x, 'b':b, 'len':l, 'stat':stat}
         elif child.tag == 'LOADDATA':
             bus = int(child.find('I').text.strip())
-            ckt = int(child.find('ID').text.strip())
+            load_id = child.find('ID').text.strip()
             stat = int(child.find('STAT').text.strip())
-            key = '{:d}_{:d}'.format(bus, ckt)
-            scale = float(child.find('SCALE').text.strip()) # assume scaling of just the ZIP loads
+            key = '{:d}_{:s}'.format(bus, load_id)
+            scale = int(child.find('SCALE').text.strip()) # assume scaling of just the ZIP loads
             Pp = float(child.find('PL').text.strip())
             Qp = float(child.find('QL').text.strip())
             Pi = float(child.find('IP').text.strip())
             Qi = float(child.find('IQ').text.strip())
             Pz = float(child.find('YP').text.strip())
             Qz = float(child.find('YQ').text.strip())
-            Loads[key] = {'bus':bus, 'ckt': ckt, 'stat': stat, 'Pp': Pp, 'Qp': Qp, 'Pi': Pi, 'Qi': Qi, 'Pz': Pz, 'Qz': Qz, 'scale': scale}
+            Loads[key] = {'bus':bus, 'id': load_id, 'stat': stat, 'Pp': Pp, 'Qp': Qp, 'Pi': Pi, 'Qi': Qi, 'Pz': Pz, 'Qz': Qz, 'scale': scale}
         elif child.tag == 'GENERATORDATA':
             bus = int(child.find('I').text.strip())
             gen_id = child.find('ID').text.strip()
@@ -644,8 +675,10 @@ def convertRawtoCIM(workpath, xmlname, addon_fueltype, cimname, fuidname, contai
             bus1 = int(child.find('I').text.strip())
             bus2 = int(child.find('J').text.strip())
             bus3 = int(child.find('K').text.strip())
-            ckt = int(child.find('CKT').text.strip())
-            key = '{:d}_{:d}_{:d}_{:d}'.format(bus1, bus2, bus3, ckt)
+            ckt = child.find('CKT').text.strip()
+            key = child.find('NAME').text
+            if key is None:
+                key = '{:d}_{:d}_{:d}_{:s}'.format(bus1, bus2, bus3, ckt)
             cw = int(child.find('CW').text.strip())
             cz = int(child.find('CZ').text.strip())
             cm = int(child.find('CM').text.strip())
@@ -668,13 +701,32 @@ def convertRawtoCIM(workpath, xmlname, addon_fueltype, cimname, fuidname, contai
             windv2 = float(child.find('WINDV2').text.strip())
             nomv1 = float(child.find('NOMV1').text.strip())
             nomv2 = float(child.find('NOMV2').text.strip())
-            Transformers[key] = {'bus1':bus1, 'bus2':bus2, 'bus3':bus3, 'ckt':ckt, 
-                                 'cw':cw, 'cz':cz, 'cm':cm, 
-                                 'mag1':mag1, 'mag2':mag2, 
-                                 'nmetr':nmetr, 'stat':stat, 
-                                 'o1':o1, 'f1':f1, 'o2':o2, 'f2':f2, 'o3':o3, 'f3':f3, 'o4':o4, 'f4':f4, 
-                                 'r1-2':r12, 'x1-2':x12, 'sbase1-2':sbase12,  
-                                 'windv1':windv1, 'nomv1':nomv1, 'windv2':windv2, 'nomv2':nomv2}
+            if bus3 != 0:
+                r23 = float(child.find('R23').text.strip())
+                x23 = float(child.find('X23').text.strip())
+                sbase23 = float(child.find('SBASE23').text.strip())
+                r31 = float(child.find('R31').text.strip())
+                x31 = float(child.find('X31').text.strip())
+                sbase31 = float(child.find('SBASE31').text.strip())
+                windv3 = float(child.find('WINDV3').text.strip())
+                nomv3 = float(child.find('NOMV3').text.strip())
+                Transformers[key] = {'bus1':bus1, 'bus2':bus2, 'bus3':bus3, 'ckt':ckt, 
+                                    'cw':cw, 'cz':cz, 'cm':cm, 
+                                    'mag1':mag1, 'mag2':mag2, 
+                                    'nmetr':nmetr, 'stat':stat, 
+                                    'o1':o1, 'f1':f1, 'o2':o2, 'f2':f2, 'o3':o3, 'f3':f3, 'o4':o4, 'f4':f4, 
+                                    'r1-2':r12, 'x1-2':x12, 'sbase1-2':sbase12,
+                                    'r2-3':r23, 'x2-3':x23, 'sbase2-3':sbase23,
+                                    'r3-1':r31, 'x3-1':x31, 'sbase3-1':sbase31,  
+                                    'windv1':windv1, 'nomv1':nomv1, 'windv2':windv2, 'nomv2':nomv2, 'windv3':windv3, 'nomv3':nomv3}
+            else:
+                Transformers[key] = {'bus1':bus1, 'bus2':bus2, 'bus3':bus3, 'ckt':ckt, 
+                                    'cw':cw, 'cz':cz, 'cm':cm, 
+                                    'mag1':mag1, 'mag2':mag2, 
+                                    'nmetr':nmetr, 'stat':stat, 
+                                    'o1':o1, 'f1':f1, 'o2':o2, 'f2':f2, 'o3':o3, 'f3':f3, 'o4':o4, 'f4':f4, 
+                                    'r1-2':r12, 'x1-2':x12, 'sbase1-2':sbase12,  
+                                    'windv1':windv1, 'nomv1':nomv1, 'windv2':windv2, 'nomv2':nomv2}
         elif child.tag == 'SWITCHEDSHUNTDATA':
             bus = int(child.find('I').text.strip())
             modsw = int(child.find('MODSW').text.strip())
@@ -751,9 +803,9 @@ def convertRawtoCIM(workpath, xmlname, addon_fueltype, cimname, fuidname, contai
 
     #%% manage a persistent set of mRIDs, indexed by CIMClass:Name
     uuids = {}
-    if os.path.exists(fuidname):
-        print ('reading instance mRIDs from ', fuidname)
-        fuid = open (fuidname, 'r')
+    if os.path.exists(cim_mrid_file):
+        print ('reading instance mRIDs from ', cim_mrid_file)
+        fuid = open (cim_mrid_file, 'r')
         for uuid_ln in fuid.readlines():
             uuid_toks = re.split('[,\s]+', uuid_ln)
             if len(uuid_toks) > 2 and not uuid_toks[0].startswith('//'):
@@ -765,44 +817,69 @@ def convertRawtoCIM(workpath, xmlname, addon_fueltype, cimname, fuidname, contai
         fuid.close()
     
     #%% write 
-    fp = open(cimname, 'w')
+    fp = open(cim_xml_file, 'w')
     fp.write(preamble_template.format(RDF_NS=RDF_NS, CIM_NS=CIM_NS))
     
     # write container
-    contID = GetCIMID('ConnectivityNodeContainer', containername, uuids)
-    fp.write(container_template.format(mRID=contID, name=containername, desc=containerdesc))
+    contID = GetCIMID('ConnectivityNodeContainer', cim_container_name, uuids)
+    containerdesc = f"{cim_container_name} System"
+    fp.write(container_template.format(mRID=contID, name=cim_container_name, desc=containerdesc))
     
-    # write voltage level
-    for key, row in VoltageLevels.items():
+    for key, row in Substations.items():
+        name = str(key)
+        mRID = GetCIMID('Substation', name, uuids)
+        Substations[key]['mRID'] = mRID
+        containerdesc = f"Substation container for bus {name}"
+        fp.write(Substation_template.format(mRID=mRID, name=name, containerdesc=containerdesc))
+
+    # write BaseVoltage
+    for key, row in BaseVoltages.items():
         mRID = GetCIMID('BaseVoltage', key, uuids)
-        VoltageLevels[key]['mRID'] = mRID
+        BaseVoltages[key]['mRID'] = mRID
         fp.write (basevoltage_template.format(mRID=mRID, name=key, volts=row['kV']*1000.0))
+
+    # write VoltageLevel
+    for key, row in VoltageLevels.items():
+        mRID = GetCIMID('VoltageLevel', key, uuids)
+        VoltageLevels[key]['mRID'] = mRID
+        base_voltage_mrid = BaseVoltages[key]['mRID']
+        substation_mrid = None
+        for subkey, subrow in Substations.items():
+            if subrow['VoltageLevel'] == key:
+                substation_mrid = subrow['mRID']
+            if substation_mrid is not None:
+                break
+        fp.write(voltage_level_template.format(mRID=mRID, name=f"Voltage_Level_{row['kV']:.2f}", bvID=base_voltage_mrid, substationID=substation_mrid))
 
     # write bus
     for key, row in Buses.items():
-        name = str(key)
+        name = row['Name']
+        aliasName = str(key)
         desc = '{:s}: {:.2f} kV'.format(row['Name'], row['kV'])
         mRID = GetCIMID('ConnectivityNode', name, uuids)
-        fp.write (bus_template.format(mRID=mRID, name=name, desc=desc, contID=contID))
+        bus_container_mrid = Substations[key]['mRID']
+        fp.write (bus_template.format(mRID=mRID, name=name, aliasName=aliasName, desc=desc, contID=bus_container_mrid))
+        
         
     # write branch
     for key, row in Branches.items():
         name = str(key)
+        contID = Substations[row['bus1']]['mRID']
         if row['stat'] < 1:
             continue
         elif row['type'] == OHD_BRANCH:
             mRID = GetCIMID('ACLineSegment', name, uuids)
-            fp.write (acline_template.format(mRID=mRID, name=name, contID=contID, bvID=GetBaseVoltageID(row['bus1'], Buses, VoltageLevels), 
+            fp.write (acline_template.format(mRID=mRID, name=name, contID=contID, bvID=GetBaseVoltageID(row['bus1'], Buses, BaseVoltages), 
                                             length=row['len'], r=row['r'], x=row['x'], bch=row['b'], r0=row['r0'], 
                                             x0=row['x0'], bch0=row['b0']))
         elif row['type'] == UG_BRANCH:
             mRID = GetCIMID('ACLineSegment', name, uuids)
-            fp.write (acline_template.format(mRID=mRID, name=name, contID=contID, bvID=GetBaseVoltageID(row['bus1'], Buses, VoltageLevels), 
+            fp.write (acline_template.format(mRID=mRID, name=name, contID=contID, bvID=GetBaseVoltageID(row['bus1'], Buses, BaseVoltages), 
                                             length=row['len'], r=row['r'], x=row['x'], bch=row['b'], r0=row['r0'], 
                                             x0=row['x0'], bch0=row['b0']))
         elif row['type'] == CAP_BRANCH:
             mRID = GetCIMID('SeriesCompensator', name, uuids)
-            fp.write (seriescap_template.format(mRID=mRID, name=name, contID=contID, bvID=GetBaseVoltageID(row['bus1'], Buses, VoltageLevels), 
+            fp.write (seriescap_template.format(mRID=mRID, name=name, contID=contID, bvID=GetBaseVoltageID(row['bus1'], Buses, BaseVoltages), 
                                                 r=row['r'], x=row['x'], r0=row['r0'], x0=row['x0']))
         else:
             print ('unrecognized branch {:s} of type {:s}'.format(name, row['type']))
@@ -813,6 +890,7 @@ def convertRawtoCIM(workpath, xmlname, addon_fueltype, cimname, fuidname, contai
     LoadResponseCharacteristics = {}
     for key, row in Loads.items():
         name = str(key)
+        contID = Substations[row['bus']]['mRID']
         if row['stat'] < 1:
             continue
         p = (row['Pp'] + row['Pi'] + row['Pz']) * row['scale'] * 1.0e6 # remember, load P is MW in CIM but W in CIMHub
@@ -840,7 +918,7 @@ def convertRawtoCIM(workpath, xmlname, addon_fueltype, cimname, fuidname, contai
             LoadResponseCharacteristics[LRkey] = {'mRID': GetCIMID('LoadResponseCharacteristic', LRkey, uuids),
                                                 'Zp': Zp, 'Ip': Ip, 'Pp': Pp, 'Zq': Zq, 'Iq': Iq, 'Pq': Pq}
         mRID = GetCIMID('EnergyConsumer', name, uuids)
-        fp.write (load_template.format(mRID=mRID, name=name, p=p, q=q, bvID=GetBaseVoltageID(row['bus'], Buses, VoltageLevels), 
+        fp.write (load_template.format(mRID=mRID, name=name, p=p, q=q, bvID=GetBaseVoltageID(row['bus'], Buses, BaseVoltages), 
                                         lrID=LoadResponseCharacteristics[LRkey]['mRID'], contID=contID))
         WriteCIMTerminals(fp, mRID, [row['bus']], uuids)
 
@@ -852,14 +930,15 @@ def convertRawtoCIM(workpath, xmlname, addon_fueltype, cimname, fuidname, contai
     # write switched shunt
     for key, row in Shunts.items():
         name = str(key)
-        kv = GetBaseVoltageKV(row['bus'], Buses, VoltageLevels)
+        kv = GetBaseVoltageKV(row['bus'], Buses, BaseVoltages)
         nomU = kv*1000
         bSection = row['b1']/kv/kv
         N1 = row['n1']
         sections = row['binit']/row['b1']
         mRID = GetCIMID('LinearShuntCompensator', name, uuids)
+        contID = Substations[row['bus']]['mRID']
         fp.write(shunt_template.format(mRID=mRID, name=name, contID=contID,
-                                        bvID=GetBaseVoltageID(row['bus'], Buses, VoltageLevels), 
+                                        bvID=GetBaseVoltageID(row['bus'], Buses, BaseVoltages), 
                                         nomU=nomU, gSection=0, bSection=bSection, 
                                         N1=N1, sections=sections))
         WriteCIMTerminals(fp, mRID, [row['bus']], uuids)
@@ -867,14 +946,15 @@ def convertRawtoCIM(workpath, xmlname, addon_fueltype, cimname, fuidname, contai
     # write fixed shunt
     for key, row in FixedShunts.items():
         name = str(key)
-        kv = GetBaseVoltageKV(row['bus'], Buses, VoltageLevels)
-        bvID=GetBaseVoltageID(row['bus'], Buses, VoltageLevels)
+        kv = GetBaseVoltageKV(row['bus'], Buses, BaseVoltages)
+        bvID=GetBaseVoltageID(row['bus'], Buses, BaseVoltages)
         nomU = kv*1000
         bSection = row['bl']*1.0e6/nomU/nomU
         gSection = row['gl']*1.0e6/nomU/nomU
         N1 = 1
         sections = 1
         mRID = GetCIMID('LinearShuntCompensator', name, uuids)
+        contID = Substations[row['bus']]['mRID']
         fp.write(shunt_template.format(mRID=mRID, name=name, contID=contID,bvID=bvID, 
                                         nomU=nomU, gSection=gSection, bSection=bSection, 
                                         N1=N1, sections=sections))
@@ -886,9 +966,9 @@ def convertRawtoCIM(workpath, xmlname, addon_fueltype, cimname, fuidname, contai
         xfmr_name = str(key)
         xfmr_mRID = GetCIMID('PowerTransformer', xfmr_name, uuids)
         if row['nomv1'] == 0:
-            row['nomv1'] = GetBaseVoltageKV(row['bus1'], Buses, VoltageLevels)
+            row['nomv1'] = GetBaseVoltageKV(row['bus1'], Buses, BaseVoltages)
         if row['nomv2'] == 0:
-            row['nomv2'] = GetBaseVoltageKV(row['bus2'], Buses, VoltageLevels)
+            row['nomv2'] = GetBaseVoltageKV(row['bus2'], Buses, BaseVoltages)
         if row['nomv2'] > row['nomv1']:
             bus_list = [row['bus2'], row['bus1']]
             NomV_list = [row['nomv2'], row['nomv1']]
@@ -900,6 +980,7 @@ def convertRawtoCIM(workpath, xmlname, addon_fueltype, cimname, fuidname, contai
             vgrp = 'Yy'
         else:
             vgrp = 'Yd1'
+        contID = Substations[row['bus1']]['mRID']
         fp.write(xfmr_template.format(mRID=xfmr_mRID, name=xfmr_name, contID=contID, vgrp=vgrp))
         # terminal x2
         WriteCIMTerminals(fp, xfmr_mRID, bus_list, uuids)
@@ -939,7 +1020,7 @@ def convertRawtoCIM(workpath, xmlname, addon_fueltype, cimname, fuidname, contai
                 grounded_list.append('false')
                 phaseAngleClock_list.append(1)
             trmRef_list.append(trmmRID_list[i])
-            bvRef = GetBaseVoltageID(bus_list[i], Buses, VoltageLevels)
+            bvRef = GetBaseVoltageID(bus_list[i], Buses, BaseVoltages)
             bvRef_list.append(bvRef)
         for i in range(2):
             fp.write(end_template.format(mRID=end_mRID_list[i], name=end_name_list[i], xfRef=xfmr_mRID, 
@@ -976,7 +1057,7 @@ def convertRawtoCIM(workpath, xmlname, addon_fueltype, cimname, fuidname, contai
     nt = 0
     
     for key, row in Generators.items():
-        
+        contID = Substations[row['bus']]['mRID']
         if row['ftype'] in ['HydroGenerating', 'ThermalGenerating', 'NuclearGenerating']:
             # mRIDs
             gen_name = str(key)
@@ -998,7 +1079,7 @@ def convertRawtoCIM(workpath, xmlname, addon_fueltype, cimname, fuidname, contai
             p = row['pg']*1e6
             q = row['qg']*1e6
             ratedS = row['mbase']*1e6
-            kv = GetBaseVoltageKV(row['bus'], Buses, VoltageLevels)
+            kv = GetBaseVoltageKV(row['bus'], Buses, BaseVoltages)
             ratedU = kv*1e3
             maxQ = row['qt']*1e6
             minQ = row['qb']*1e6
@@ -1099,7 +1180,7 @@ def convertRawtoCIM(workpath, xmlname, addon_fueltype, cimname, fuidname, contai
             
     # write wind turbine generator
     for key, row in Generators.items():
-        
+        contID = Substations[row['bus']]['mRID']
         if row['ftype'] == 'WindGenerating':
             # mRIDs
             PEname = str(key)+'_Connection'
@@ -1122,7 +1203,7 @@ def convertRawtoCIM(workpath, xmlname, addon_fueltype, cimname, fuidname, contai
             p = row['pg']*1e6
             q = row['qg']*1e6
             ratedS = row['mbase']*1e6
-            kv = GetBaseVoltageKV(row['bus'], Buses, VoltageLevels)
+            kv = GetBaseVoltageKV(row['bus'], Buses, BaseVoltages)
             ratedU = kv*1e3
             maxQ = row['qt']*1e6
             minQ = row['qb']*1e6
@@ -1193,7 +1274,7 @@ def convertRawtoCIM(workpath, xmlname, addon_fueltype, cimname, fuidname, contai
     
     # write solar (PV plant)
     for key, row in Generators.items():
-        
+        contID = Substations[row['bus']]['mRID']
         if row['ftype'] == 'Photovoltaic':
             # mRIDs
             PEname = str(key)+'_Connection'
@@ -1216,7 +1297,7 @@ def convertRawtoCIM(workpath, xmlname, addon_fueltype, cimname, fuidname, contai
             p = row['pg']*1e6
             q = row['qg']*1e6
             ratedS = row['mbase']*1e6
-            kv = GetBaseVoltageKV(row['bus'], Buses, VoltageLevels)
+            kv = GetBaseVoltageKV(row['bus'], Buses, BaseVoltages)
             ratedU = kv*1e3
             maxQ = row['qt']*1e6
             minQ = row['qb']*1e6
@@ -1287,40 +1368,53 @@ def convertRawtoCIM(workpath, xmlname, addon_fueltype, cimname, fuidname, contai
     fp.close()
     
     #%% save the mRIDs for re-use
-    print('saving instance mRIDs to ', fuidname)
-    fuid = open(fuidname, 'w')
+    print('saving instance mRIDs to ', cim_mrid_file)
+    fuid = open(cim_mrid_file, 'w')
     for key, val in uuids.items():
         print('{:s},{:s}'.format(key.replace(':', ',', 1), val), file=fuid)
     fuid.close()
 
+
+def main(psse_xml_file: str, cim_xml_file: str, cim_mrid_file: str, cim_container_name: str, fuel_addon_file = None):
+    convertRawtoCIM(psse_xml_file, cim_xml_file, cim_mrid_file, cim_container_name, fuel_addon_file)
+    pass
+    
+
 #%%
 if __name__ == "__main__":
+    parser = ArgumentParser()
+    parser.add_argument("psse_xml_file", help = "The absolute file path for the PSSE raw xml file.")
+    parser.add_argument("cim_xml_file", help = "The desired CIM XML output file.")
+    parser.add_argument("cim_mrid_file", help = "The file used to store newly generated mRID's and preserve previously generated mRID's for the given PSSE raw xml file.")
+    parser.add_argument("cim_container_name", help = "The desired name of the generated PSSE CIM model container.")
+    parser.add_argument("fuel_addon_file", nargs = "?", default = None, help = "An optional fuel type file.")
+    args = parser.parse_args()
+    main(args.psse_xml_file, args.cim_xml_file, args.cim_mrid_file, args.cim_container_name, args.fuel_addon_file)
+    # # user selected model
+    # for model in ["IEEE118", "WECC240"]:
     
-    # user selected model
-    for model in ["IEEE118", "WECC240"]:
-    
-      if model == "IEEE118": 
-          workpath = 'ieee118/'
-          xmlname = 'IEEE118.xml'
-          addon_fueltype = 'gen_fuel_type.xlsx'
+    #   if model == "IEEE118": 
+    #       workpath = 'ieee118/'
+    #       xmlname = 'IEEE118.xml'
+    #       addon_fueltype = 'gen_fuel_type.xlsx'
           
-          cimname = 'IEEE118_CIM.xml'
-          fuidname = 'IEEE118mRID.dat'
-          containername = 'IEEE118'
-          containerdesc = 'IEEE118 System'
-      elif model == "WECC240":
-          workpath = 'wecc240/'
-          xmlname = 'WECC240.xml'
-          addon_fueltype = 'gen_fuel_type.xlsx'
+    #       cim_xml_file = 'IEEE118_CIM.xml'
+    #       fuidname = 'IEEE118mRID.dat'
+    #       containername = 'IEEE118'
+    #       containerdesc = 'IEEE118 System'
+    #   elif model == "WECC240":
+    #       workpath = 'wecc240/'
+    #       xmlname = 'WECC240.xml'
+    #       addon_fueltype = 'gen_fuel_type.xlsx'
           
-          cimname = 'WECC240_CIM.xml'
-          fuidname = 'WECC240mRID.dat'
-          containername = 'WECC240'
-          containerdesc = 'WECC240 System'
-      else:
-          sys.exit("this model is not supported")
+    #       cim_xml_file = 'WECC240_CIM.xml'
+    #       fuidname = 'WECC240mRID.dat'
+    #       containername = 'WECC240'
+    #       containerdesc = 'WECC240 System'
+    #   else:
+    #       sys.exit("this model is not supported")
       
-      convertRawtoCIM(workpath, xmlname, addon_fueltype, 
-                      cimname, fuidname, containername, containerdesc)
+    #   convertRawtoCIM(workpath, xmlname, addon_fueltype, 
+    #                   cim_xml_file, fuidname, containername, containerdesc)
       
     
