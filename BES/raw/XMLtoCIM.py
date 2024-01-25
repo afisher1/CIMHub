@@ -512,16 +512,32 @@ Substation_template = """<cim:Substation rdf:about="urn:uuid:{mRID}">
     <cim:IdentifiedObject.mRID>{mRID}</cim:IdentifiedObject.mRID>
     <cim:IdentifiedObject.name>{name}</cim:IdentifiedObject.name>
     <cim:IdentifiedObject.description>{containerdesc}</cim:IdentifiedObject.description>
+    <cim:Substation.Region rdf:resource="urn:uuid:{regionID}"/>
 </cim:Substation>
 """
 
-# Substation Model
+# VoltageLevel Model
 voltage_level_template = """<cim:VoltageLevel rdf:about="urn:uuid:{mRID}">
     <cim:IdentifiedObject.mRID>{mRID}</cim:IdentifiedObject.mRID>
     <cim:IdentifiedObject.name>{name}</cim:IdentifiedObject.name>
     <cim:VoltageLevel.BaseVoltage rdf:resource="urn:uuid:{bvID}"/>
     <cim:VoltageLevel.Substation rdf:resource="urn:uuid:{substationID}"/>
 </cim:VoltageLevel>
+"""
+
+# GeographicalRegion Model
+geographical_region_template = """<cim:GeographicalRegion rdf:about="urn:uuid:{mRID}">
+    <cim:IdentifiedObject.mRID>{mRID}</cim:IdentifiedObject.mRID>
+    <cim:IdentifiedObject.name>{name}</cim:IdentifiedObject.name>
+</cim:GeographicalRegion>
+"""
+
+# SubgeographicalRegion Model
+subgeographical_region_template = """<cim:SubGeographicalRegion rdf:about="urn:uuid:{mRID}">
+    <cim:IdentifiedObject.mRID>{mRID}</cim:IdentifiedObject.mRID>
+    <cim:IdentifiedObject.name>{name}</cim:IdentifiedObject.name>
+    <cim:SubGeographicalRegion.Region rdf:resource="urn:uuid:{geoID}"/>
+</cim:SubGeographicalRegion>
 """
 #%%
 
@@ -536,6 +552,9 @@ def convertRawtoCIM(psse_xml_file: str, cim_xml_file: str, cim_mrid_file: str, c
     # The general approach is to read raw XML into Python dictionaries,
     #   which may be cross-referenced by key.
     # Then we can write out CIM XML by traversing the dictionaries.
+    Areas = {}
+    Zones = {}
+    Owners = {}
     BaseVoltages = {}
     VoltageLevels = {}
     Buses = {}
@@ -566,15 +585,21 @@ def convertRawtoCIM(psse_xml_file: str, cim_xml_file: str, cim_mrid_file: str, c
             busname = child.find('NAME').text.strip()
             busnum = int(child.find('I').text.strip())
             buskv = float(child.find('BASKV').text.strip())
+            area = int(child.find('AREA').text.strip())
+            zone = int(child.find('ZONE').text.strip())
+            owner = int(child.find('OWNER').text.strip())
             # The most convenient key, for lookups, is probably busnum.
             # Buses[busnum] = {'Name':busname, 'kV': buskv}
             vlevel = 'BV_{:.2f}'.format(buskv)
-            Buses[busnum] = {'Name':busname, 'kV': buskv, 'VoltageLevel': vlevel}
-            if vlevel not in VoltageLevels:
-                VoltageLevels[vlevel] = {'kV': buskv}
+            Buses[busnum] = {'Name':busname, 'kV': buskv, 'VoltageLevel': vlevel, 'area': area, 'zone': zone, 'owner': owner}
+            if area not in Areas.keys():
+                Areas[area] = {}
+            if zone not in Zones.keys():
+                Zones[zone] = {'area': area}
+            VoltageLevels[busnum] = {'kV': buskv, 'baseVoltage': vlevel}
             if vlevel not in BaseVoltages:
                 BaseVoltages[vlevel] = {'kV': buskv}
-            Substations[busnum] = {'Name':f"substation_{busname if busname else busnum}", 'kV': buskv, 'VoltageLevel': vlevel}
+            Substations[busnum] = {'Name':f"substation_{busname if busname else busnum}", 'kV': buskv, 'VoltageLevel': vlevel, 'area': area, 'zone': zone, 'owner': owner}
             # print ('{:5d} {:12s} {:7.3f}'.format(busnum, busname, buskv))
         elif child.tag == 'BRANCHDATA':
             bus1 = int(child.find('I').text.strip())
@@ -605,7 +630,10 @@ def convertRawtoCIM(psse_xml_file: str, cim_xml_file: str, cim_mrid_file: str, c
             Qi = float(child.find('IQ').text.strip())
             Pz = float(child.find('YP').text.strip())
             Qz = float(child.find('YQ').text.strip())
-            Loads[key] = {'bus':bus, 'id': load_id, 'stat': stat, 'Pp': Pp, 'Qp': Qp, 'Pi': Pi, 'Qi': Qi, 'Pz': Pz, 'Qz': Qz, 'scale': scale}
+            area = int(child.find('AREA').text.strip())
+            zone = int(child.find('ZONE').text.strip())
+            owner = int(child.find('OWNER').text.strip())
+            Loads[key] = {'bus':bus, 'id': load_id, 'stat': stat, 'Pp': Pp, 'Qp': Qp, 'Pi': Pi, 'Qi': Qi, 'Pz': Pz, 'Qz': Qz, 'scale': scale, 'area': area, 'zone': zone, 'owner': owner}
         elif child.tag == 'GENERATORDATA':
             bus = int(child.find('I').text.strip())
             gen_id = child.find('ID').text.strip()
@@ -749,6 +777,16 @@ def convertRawtoCIM(psse_xml_file: str, cim_xml_file: str, cim_mrid_file: str, c
             bl = float(child.find('BL').text.strip())
             gl = float(child.find('GL').text.strip())
             FixedShunts[key] = {'bus': bus, 'bl': bl, 'gl': gl}
+        elif child.tag == "AREADATA":
+            areaNum = int(child.find('I').text.strip())
+            name = child.find('ARNAME').text
+            if areaNum in Areas.keys():
+                Areas[areaNum]['name'] = name
+        elif child.tag == "ZONEDATA":
+            zoneNum = int(child.find('I').text.strip())
+            name = child.find('ZONAME').text
+            if zoneNum in Zones.keys():
+                Zones[zoneNum]['name'] = name
             
     print ('Found', len(Buses), 'buses,', len(VoltageLevels), 'voltage levels,', len(Branches), 'branches,',
         len (Loads), 'loads,', len(Generators), 'generators,', len(Transformers), 'transformers,', len(Shunts), 'shunts')
@@ -825,12 +863,28 @@ def convertRawtoCIM(psse_xml_file: str, cim_xml_file: str, cim_mrid_file: str, c
     containerdesc = f"{cim_container_name} System"
     fp.write(container_template.format(mRID=contID, name=cim_container_name, desc=containerdesc))
     
+    # write GeographicalRegion
+    for key, row in Areas.items():
+        name = row['name']
+        mRID = GetCIMID('GeographicalRegion', name, uuids)
+        Areas[key]['mRID'] = mRID
+        fp.write(geographical_region_template.format(name=name, mRID=mRID))
+
+    for key, row in Zones.items():
+        name = row['name']
+        mRID = GetCIMID('SubGeographicaRegion', name, uuids)
+        area = row['area']
+        Zones[key]['mRID'] = mRID
+        fp.write(subgeographical_region_template.format(name=name, mRID=mRID, geoID=Areas[area]['mRID']))
+
+    # write Substation
     for key, row in Substations.items():
-        name = str(key)
+        name = row['Name']
         mRID = GetCIMID('Substation', name, uuids)
         Substations[key]['mRID'] = mRID
-        containerdesc = f"Substation container for bus {name}"
-        fp.write(Substation_template.format(mRID=mRID, name=name, containerdesc=containerdesc))
+        containerdesc = f"Substation container for bus {key}"
+        zone = row['zone']
+        fp.write(Substation_template.format(mRID=mRID, name=name, containerdesc=containerdesc, regionID=Zones[zone]['mRID']))
 
     # write BaseVoltage
     for key, row in BaseVoltages.items():
@@ -840,15 +894,10 @@ def convertRawtoCIM(psse_xml_file: str, cim_xml_file: str, cim_mrid_file: str, c
 
     # write VoltageLevel
     for key, row in VoltageLevels.items():
-        mRID = GetCIMID('VoltageLevel', key, uuids)
+        mRID = GetCIMID('VoltageLevel', str(key), uuids)
         VoltageLevels[key]['mRID'] = mRID
-        base_voltage_mrid = BaseVoltages[key]['mRID']
-        substation_mrid = None
-        for subkey, subrow in Substations.items():
-            if subrow['VoltageLevel'] == key:
-                substation_mrid = subrow['mRID']
-            if substation_mrid is not None:
-                break
+        base_voltage_mrid = BaseVoltages[row['baseVoltage']]['mRID']
+        substation_mrid = Substations[key]['mRID']
         fp.write(voltage_level_template.format(mRID=mRID, name=f"Voltage_Level_{row['kV']:.2f}", bvID=base_voltage_mrid, substationID=substation_mrid))
 
     # write bus
