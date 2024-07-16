@@ -66,11 +66,11 @@ preamble_template = """<?xml version="1.0" encoding="utf-8"?>
 
 # CIM has a hierarchy of containers for Line, Plant, VoltageLevel (in a substation), etc. 
 # We may not need any of this for EMT, so for now, creating an abstract instance as placeholder
-container_template = """<cim:ConnectivityNodeContainer rdf:about="urn:uuid:{mRID}">
+container_template = """<cim:EquipmentContainer rdf:about="urn:uuid:{mRID}">
     <cim:IdentifiedObject.mRID>{mRID}</cim:IdentifiedObject.mRID>
     <cim:IdentifiedObject.name>{name}</cim:IdentifiedObject.name>
     <cim:IdentifiedObject.description>{desc}</cim:IdentifiedObject.description>
-</cim:ConnectivityNodeContainer>
+</cim:EquipmentContainer>
 """
 
 basevoltage_template = """<cim:BaseVoltage rdf:about="urn:uuid:{mRID}">
@@ -662,7 +662,7 @@ def convertRawtoCIM(psse_xml_file: str, cim_xml_file: str, cim_mrid_file: str, c
                 if fuel_gen == 'SOL (Solar)':
                     ftype = 'Photovoltaic'
                 elif fuel_gen == 'WND (Wind)':
-                    ftype = 'WindGenerating'
+                    ftype = 'PowerElectronicsWind'
                 elif fuel_gen == 'NUC (Nuclear)':
                     ftype = 'NuclearGenerating'
                 elif fuel_gen == 'HYD (Hydro)':
@@ -1230,7 +1230,7 @@ def convertRawtoCIM(psse_xml_file: str, cim_xml_file: str, cim_mrid_file: str, c
     # write wind turbine generator
     for key, row in Generators.items():
         contID = Substations[row['bus']]['mRID']
-        if row['ftype'] == 'WindGenerating':
+        if row['ftype'] == 'PowerElectronicsWind':
             # mRIDs
             PEname = str(key)+'_Connection'
             PEID = GetCIMID('PowerElectronicsConnection', PEname, uuids)
