@@ -1238,7 +1238,7 @@ public class CIMImporter extends Object {
 
   protected void WriteGLMFile (PrintWriter out, double load_scale, boolean bWantSched, String fSched,
       boolean bWantZIP, boolean randomZIP, boolean useHouses, double Zcoeff, double Icoeff, double Pcoeff, 
-      boolean bHaveEventGen, boolean bUseProfiles, String fInclude1, String fInclude2) {
+      boolean bHaveEventGen, List<String> separateLoads, boolean bUseProfiles, String fInclude1, String fInclude2) {
 
     DistEnergyConnectionProfile prf = null;
     HashMap<String,String> mapUsedProfiles = new HashMap<>(); // name, and one of the keys that uses it
@@ -1622,28 +1622,28 @@ public class CIMImporter extends Object {
       }
     }
 
-    // GLM nodes and loads
-    boolean bWroteEventGen = bHaveEventGen;
-    for (HashMap.Entry<String,GldNode> pair : mapNodes.entrySet()) {
-      GldNode nd = pair.getValue();
-      out.print (pair.getValue().GetGLM (load_scale, bWantSched, fSched, bWantZIP, useHouses, Zcoeff, Icoeff, Pcoeff));
-      if (!bWroteEventGen && nd.bSwingPQ) {
-        // we can't have two fault_check objects, and there may already be one for external event scripting
-        bWroteEventGen = true;
-        out.print ("object fault_check {\n");
-        out.print ("  name base_fault_check_object;\n");
-        out.print ("  check_mode ONCHANGE;\n");
-        out.print ("  strictly_radial false;\n");
-        out.print ("  eventgen_object testgendev;\n");
-        out.print ("  grid_association true;\n");
-        out.print ("}\n");
-        out.print ("object eventgen {\n");
-        out.print ("  name testgendev;\n");
-        out.print ("  fault_type \"DLG-X\";\n");
-        out.print ("  manual_outages \"" + nd.name + ",2100-01-01 00:00:05,2100-01-01 00:00:30\";\n");
-        out.print ("}\n");
-      }
-    }
+		// GLM nodes and loads
+		boolean bWroteEventGen = bHaveEventGen;
+		for (HashMap.Entry<String,GldNode> pair : mapNodes.entrySet()) {
+			GldNode nd = pair.getValue();
+			out.print (pair.getValue().GetGLM (load_scale, bWantSched, fSched, bWantZIP, useHouses, Zcoeff, Icoeff, Pcoeff, separateLoads));
+			if (!bWroteEventGen && nd.bSwingPQ) {
+				// we can't have two fault_check objects, and there may already be one for external event scripting
+				bWroteEventGen = true;
+				out.print ("object fault_check {\n");
+				out.print ("	name base_fault_check_object;\n");
+				out.print ("	check_mode ONCHANGE;\n");
+				out.print ("	strictly_radial false;\n");
+				out.print ("	eventgen_object testgendev;\n");
+				out.print ("	grid_association true;\n");
+				out.print ("}\n");
+				out.print ("object eventgen {\n");
+				out.print ("	name testgendev;\n");
+				out.print ("	fault_type \"DLG-X\";\n");
+				out.print ("	manual_outages \"" + nd.name + ",2100-01-01 00:00:05,2100-01-01 00:00:30\";\n");
+				out.print ("}\n");
+			}
+		}
 
     // GLM houses
     if (useHouses) {
@@ -2384,7 +2384,7 @@ public class CIMImporter extends Object {
       boolean useHouses, double Zcoeff, double Icoeff, double Pcoeff, boolean bHaveEventGen, ModelState ms, 
       boolean bTiming, String fEarth, int iManualFile, boolean bUseProfiles) throws FileNotFoundException{
     start(queryHandler, querySetter, fTarget, fRoot, fSched, load_scale, bWantSched, bWantZIP, randomZIP, useHouses,
-        Zcoeff, Icoeff, Pcoeff, -1, bHaveEventGen, ms, bTiming, fEarth, iManualFile, bUseProfiles);
+        Zcoeff, Icoeff, Pcoeff, -1, bHaveEventGen, ms, bTiming, new ArrayList<String>(), fEarth, iManualFile, bUseProfiles);
   }
 
 
@@ -2423,7 +2423,7 @@ public class CIMImporter extends Object {
   public void start(QueryHandler queryHandler, CIMQuerySetter querySetter, String fTarget, String fRoot, String fSched,
       double load_scale, boolean bWantSched, boolean bWantZIP, boolean randomZIP,
       boolean useHouses, double Zcoeff, double Icoeff, double Pcoeff, int maxMeasurements, boolean bHaveEventGen, 
-      ModelState ms, boolean bTiming, String fEarth, int iManualFile, boolean bUseProfiles) throws FileNotFoundException{
+      ModelState ms, boolean bTiming, List<String> separateLoads, String fEarth, int iManualFile, boolean bUseProfiles) throws FileNotFoundException{
 
     this.queryHandler = queryHandler;
     this.querySetter = querySetter;
@@ -2449,7 +2449,7 @@ public class CIMImporter extends Object {
       }
       PrintWriter pOut = new PrintWriter(fOut);
       WriteGLMFile(pOut, load_scale, bWantSched, fSched, bWantZIP, randomZIP, useHouses, Zcoeff, Icoeff, Pcoeff, 
-                   bHaveEventGen, bUseProfiles, fInclude1, fInclude2);
+                   bHaveEventGen, separateLoads, bUseProfiles, fInclude1, fInclude2);
       PrintWriter pXY = new PrintWriter(fXY);
       WriteJSONSymbolFile (pXY);
       PrintWriter pDict = new PrintWriter(fDict);
@@ -2524,7 +2524,7 @@ public class CIMImporter extends Object {
         fInclude2 = fRoot + "_edits2.glm";
       }
       WriteGLMFile(pGld, load_scale, bWantSched, fSched, bWantZIP, randomZIP, useHouses, Zcoeff, 
-                   Icoeff, Pcoeff, bHaveEventGen, bUseProfiles, fInclude1, fInclude2);
+                   Icoeff, Pcoeff, bHaveEventGen, separateLoads, bUseProfiles, fInclude1, fInclude2);
       long t9 = System.nanoTime();
       PrintWriter pSym = new PrintWriter(fRoot + "_symbols.json");
       WriteJSONSymbolFile (pSym);
@@ -2698,7 +2698,7 @@ public class CIMImporter extends Object {
     String fInclude1 = "";
     String fInclude2 = "";
     WriteGLMFile (out, load_scale, bWantSched, fSched, bWantZIP, randomZIP, useHouses, 
-                  Zcoeff, Icoeff, Pcoeff, bHaveEventGen, bUseProfiles, fInclude1, fInclude2);
+                  Zcoeff, Icoeff, Pcoeff, bHaveEventGen, new ArrayList<String>(), bUseProfiles, fInclude1, fInclude2);
   }
 
   /**
