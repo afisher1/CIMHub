@@ -1,6 +1,6 @@
 package gov.pnnl.gridappsd.cimhub;
 //  ----------------------------------------------------------
-//  Copyright (c) 2017-2021, Battelle Memorial Institute
+//  Copyright (c) 2017-2022, Battelle Memorial Institute
 //  All rights reserved.
 //  ----------------------------------------------------------
 
@@ -8,6 +8,7 @@ import java.text.DecimalFormat;
 import java.util.List;
 import java.util.Random;
 import org.apache.commons.math3.complex.Complex;
+import gov.pnnl.gridappsd.cimhub.components.DistComponent;
 
 /** 
  Helper class to accumulate nodes and loads. 
@@ -18,7 +19,7 @@ import org.apache.commons.math3.complex.Complex;
 public class GldNode {
   /** 
    *  Rotates a phasor +120 degrees by multiplication
-     */
+   */
   static final Complex pos120 = new Complex (-0.5, 0.5 * Math.sqrt(3.0));
 
   /** 
@@ -29,7 +30,7 @@ public class GldNode {
   /** 
    *  @param c complex number
    *  @return formatted string for GridLAB-D input files with 'j' at the end
-     */
+   */
   static String CFormat (Complex c) {
     String sgn;
     if (c.getImaginary() < 0.0)  {
@@ -146,7 +147,12 @@ public class GldNode {
   * transformer or triplex. 
   */ 
 
-  public boolean bSecondary; 
+  public boolean bSecondary;
+  
+  public boolean bPlayer;
+  public boolean bSchedule;
+  public String gldPlayer;
+  public String gldSchedule;
 
   /** constructor defaults to zero load and zero phases present
    *  @param name CIM name of the bus */
@@ -169,11 +175,35 @@ public class GldNode {
     bStorageInverters = false;
     bSyncMachines = false;
     bTertiaryWinding = false;
+    bPlayer = false;
+    bSchedule = false;
+  }
+
+  public double TotalLoadRealPower() {
+    return pa_z + pb_z + pc_z + pa_i + pb_i + pc_i + pa_p + pb_p + pc_p + 
+      ps1_z + ps2_z + ps12_z + ps1_i + ps2_i + ps12_i + ps1_p + ps2_p + ps12_p;
+  }
+
+  public double TotalLoadReactivePower() {
+    return qa_z + qb_z + qc_z + qa_i + qb_i + qc_i + qa_p + qb_p + qc_p + 
+      qs1_z + qs2_z + qs12_z + qs1_i + qs2_i + qs12_i + qs1_p + qs2_p + qs12_p;
   }
 
   public String DisplayString() {
     StringBuilder buf = new StringBuilder ("");
-    buf.append (name + ":" + phases + ":" + loadname + ":" + bSecondary);
+    buf.append (name + ":" + phases + ":" + loadname);
+    buf.append (" Vln=" + df2.format(nomvln));
+    buf.append (" P=" + df2.format(TotalLoadRealPower()));
+    buf.append (" Q=" + df2.format(TotalLoadReactivePower()));
+    buf.append (" bSec=" + Boolean.toString(bSecondary));
+    buf.append (" bDelta=" + Boolean.toString(bDelta));
+    buf.append (" bSwing=" + Boolean.toString(bSwing));
+    buf.append (" bSwingPQ=" + Boolean.toString(bSwingPQ));
+    buf.append (" bTert=" + Boolean.toString(bTertiaryWinding));
+    buf.append (" bPV=" + Boolean.toString(bSolarInverters));
+    buf.append (" bBat=" + Boolean.toString(bStorageInverters));
+    if (bPlayer) buf.append (" player=" + gldPlayer);
+    if (bSchedule) buf.append (" schedule=" + gldSchedule);
     return buf.toString();
   }
 
@@ -200,7 +230,9 @@ public class GldNode {
     return AddPhases (phs);
   }
 
-  /** @return phasing string for GridLAB-D with appropriate D, S or N suffix */
+  /** @return phasing string for GridLAB-D with appropriate D, S or N suffix
+   *  @param bForLoad true if this node may have load
+   *          connected, i.e., D phasing applies */
   public String GetPhases(boolean bForLoad) {
     if (bSecondary) {
       return phases + "S";
@@ -210,6 +242,17 @@ public class GldNode {
       }
     }
     return phases + "N";
+  }
+
+  public void AccumulateProfiles (String gldPlayer, String gldSchedule) {
+    if (gldPlayer.length() > 0) {
+      bPlayer = true;
+      this.gldPlayer = gldPlayer;
+    }
+    if (gldSchedule.length() > 0) {
+      bSchedule = true;
+      this.gldSchedule = gldSchedule;
+    }
   }
 
   /** Distributes a total load (pL+jqL) among the phases (phs) present on GridLAB-D node
@@ -224,12 +267,15 @@ public class GldNode {
   @param Qi reactive power constant-current percentage from a CIM LoadResponseCharacteristic 
   @param Pp real power constant-power percentage from a CIM LoadResponseCharacteristic 
   @param Qp reactive power constant-power percentage from a CIM LoadResponseCharacteristic 
-  @return void */ 
+  @param ldname name of the load to prepend with ld_ 
+  @param conn D for delta, otherwise wye 
+  @param randomZIP true to randomize the ZIP coefficients  */ 
+
   public void AccumulateLoads (String ldname, String phs, String conn, double pL, double qL, double Pv, double Qv,
-                               double Pz, double Pi, double Pp, double Qz, double Qi, double Qp, boolean randomZIP) {
+                 double Pz, double Pi, double Pp, double Qz, double Qi, double Qp, boolean randomZIP) {
     double fa = 0.0, fb = 0.0, fc = 0.0, fs1 = 0.0, fs2 = 0.0, fs12 = 0.0, denom = 0.0;
-//    System.out.println ("AccumulateLoads:" + ldname + ":" + phs + ":" + conn + ":" + df2.format(pL) + ":" + df2.format(qL));
-    loadname = "ld_" + ldname;
+  //  System.out.println ("AccumulateLoads:" + ldname + ":" + phs + ":" + conn + ":" + df2.format(pL) + ":" + df2.format(qL));
+    loadname =  DistComponent.GLMObjectPrefix ("ld_") + ldname;
     if (phs.contains("A")) {
       fa = 1.0;
       denom += 1.0;
@@ -366,7 +412,7 @@ public class GldNode {
     Z = Z / total;
     I = I / total;
     P = P / total;
-//    System.out.println ("ApplyZIP:" + df2.format(Z) + ":" + df2.format(I) + ":" + df2.format(P));
+  //  System.out.println ("ApplyZIP:" + df2.format(Z) + ":" + df2.format(I) + ":" + df2.format(P));
 
     total = pa_z + pa_i + pa_p;
     pa_z = total * Z;
@@ -426,7 +472,7 @@ public class GldNode {
   /** scales the load by a factor that probably came from the command line's -l option
    *  @param scale multiplying factor on all of the load components */
   public void RescaleLoad(double scale) {
-//    System.out.println ("RescaleLoad:" + df2.format(scale));
+  //  System.out.println ("RescaleLoad:" + df2.format(scale));
     pa_z *= scale;
     pb_z *= scale;
     pc_z *= scale;
@@ -503,7 +549,7 @@ public class GldNode {
     if (qs1_p != 0.0) return true;
     if (qs2_p != 0.0) return true;
     if (qs12_p != 0.0) return true;
-//    System.out.println ("HasLoad returning false");
+  //  System.out.println ("HasLoad returning false");
     return false;
   }
 
@@ -597,9 +643,13 @@ public class GldNode {
         base_power += sp;
       }
       if (bWantSched) {
-        buf.append ("  base_power_" + phs + " " + fSched + ".value*" + df2.format(base_power) + "; // adjusted for use with fractions and pfs\n");
+        buf.append ("  base_power_" + phs + " " + fSched + ".value*" + df2.format(base_power) + ";\n");
+      } else if (bSchedule) {
+        buf.append ("  base_power_" + phs + " " + gldSchedule + "*" + df2.format(base_power) + ";\n");
+      } else if (bPlayer) {
+        buf.append ("  base_power_" + phs + " " + gldPlayer + ".value*" + df2.format(base_power) + ";\n");
       } else {
-        buf.append ("  base_power_" + phs + " " + df2.format(base_power) + "; // adjusted for use with fractions and pfs\n");
+        buf.append ("  base_power_" + phs + " " + df2.format(base_power) + ";\n");
       }
       if (sz > 0.0) {
         buf.append ("  impedance_fraction_" + phs + " " + df6.format(sz/base_power) + ";\n");
@@ -617,7 +667,7 @@ public class GldNode {
   }
 
   public String GetGLM (double load_scale, boolean bWantSched, String fSched, boolean bWantZIP, boolean useHouses, 
-                        double Zcoeff, double Icoeff, double Pcoeff, List<String> separateLoads) {
+            double Zcoeff, double Icoeff, double Pcoeff, List<String> separateLoads) {
     StringBuilder buf = new StringBuilder();
 
     if (bTertiaryWinding) { // we have to skip it
@@ -639,9 +689,9 @@ public class GldNode {
       buf.append ("  name \"" + name + "\";\n");
       buf.append ("  phases " + GetPhases(false) + ";\n");
       buf.append ("  nominal_voltage " + df2.format(nomvln) + ";\n");
-//      if (bSyncMachines) {
-//        buf.append ("  bustype SWING_PQ;\n");
-//      }
+  //    if (bSyncMachines) {
+  //    buf.append ("  bustype SWING_PQ;\n");
+  //    }
       buf.append("}\n");
       if (bSolarInverters) {
         AppendSubMeter (buf, "triplex_meter", "_pvmtr");
@@ -676,7 +726,7 @@ public class GldNode {
       RescaleLoad (load_scale);
       if (bWantZIP) {
         ApplyZIP (Zcoeff, Icoeff, Pcoeff);
-      }     
+      }   
       if (bSecondary) {
         if (useHouses) {  // houses will be grandchildren of this, but triplex loads and primary loads cannot be grandchildren
           buf.append ("object triplex_meter {\n");
@@ -688,14 +738,13 @@ public class GldNode {
         } else {
           buf.append ("object triplex_load {\n");
           buf.append ("  name \"" + loadname + "\";\n");
-          buf.append ("  parent \"" + name + "\";\n");
+          buf.append("  parent \"" + name + "\";\n");
           buf.append ("  phases " + GetPhases(true) + ";\n");
           buf.append ("  nominal_voltage " + df2.format(nomvln) + ";\n");
           double ps1 = ps1_z + ps1_i + ps1_p;
           double ps2 = ps2_z + ps2_i + ps2_p;
           double ps12 = ps12_z + ps12_i + ps12_p;
-
-          if (separateLoads.contains(loadname)) {
+           if (separateLoads.contains(loadname)) {
             Complex base1 = new Complex (pa_z + pa_i + pa_p, qa_z + qa_i + qa_p);
             Complex base2 = new Complex (pb_z + pb_i + pb_p, qb_z + qb_i + qb_p);
             if (base1.abs() > 0.0 && base2.abs() == 0.0) {
@@ -705,21 +754,20 @@ public class GldNode {
               buf.append ("  constant_power_2 0.0+0.0j;\n");
             }
           } else {
-            if (ps1 > 0.0 && ps2 == 0.0 && ps12 == 0.0) {
-              AppendPowerByFraction (buf, "12", ps1_z, ps1_i, ps1_p, qs1_z, qs1_i, qs1_p, bWantSched, fSched);
-            } else {
-              AppendPowerByFraction (buf, "1", ps1_z, ps1_i, ps1_p, qs1_z, qs1_i, qs1_p, bWantSched, fSched);
-              AppendPowerByFraction (buf, "2", ps2_z, ps2_i, ps2_p, qs2_z, qs2_i, qs2_p, bWantSched, fSched);
-              AppendPowerByFraction (buf, "12", ps12_z, ps12_i, ps12_p, qs12_z, qs12_i, qs12_p, bWantSched, fSched);
-            }
+              if (ps1 > 0.0 && ps2 == 0.0 && ps12 == 0.0) {
+                AppendPowerByFraction (buf, "12", ps1_z, ps1_i, ps1_p, qs1_z, qs1_i, qs1_p, bWantSched, fSched);
+              } else {
+                AppendPowerByFraction (buf, "1", ps1_z, ps1_i, ps1_p, qs1_z, qs1_i, qs1_p, bWantSched, fSched);
+                AppendPowerByFraction (buf, "2", ps2_z, ps2_i, ps2_p, qs2_z, qs2_i, qs2_p, bWantSched, fSched);
+                AppendPowerByFraction (buf, "12", ps12_z, ps12_i, ps12_p, qs12_z, qs12_i, qs12_p, bWantSched, fSched);
+              }
           }
           buf.append ("}\n");
         }
       } else {
-    	Complex va = new Complex (nomvln);
+        Complex va = new Complex (nomvln);
     	Complex amps;
     	Complex vmagsq = new Complex (nomvln * nomvln);  
-    	  
         buf.append ("object load {\n");
         buf.append ("  name \"" + loadname + "\";\n");
         buf.append ("  parent \"" + name + "\";\n");
@@ -767,9 +815,9 @@ public class GldNode {
             buf.append ("  constant_current_C " + CFormat(amps) + ";\n");
           }
         } else {
-          AppendPowerByFraction (buf, "A", pa_z, pa_i, pa_p, qa_z, qa_i, qa_p, bWantSched, fSched);
-          AppendPowerByFraction (buf, "B", pb_z, pb_i, pb_p, qb_z, qb_i, qb_p, bWantSched, fSched);
-          AppendPowerByFraction (buf, "C", pc_z, pc_i, pc_p, qc_z, qc_i, qc_p, bWantSched, fSched);
+            AppendPowerByFraction (buf, "A", pa_z, pa_i, pa_p, qa_z, qa_i, qa_p, bWantSched, fSched);
+            AppendPowerByFraction (buf, "B", pb_z, pb_i, pb_p, qb_z, qb_i, qb_p, bWantSched, fSched);
+            AppendPowerByFraction (buf, "C", pc_z, pc_i, pc_p, qc_z, qc_i, qc_p, bWantSched, fSched);
         }
         buf.append ("}\n");
       }

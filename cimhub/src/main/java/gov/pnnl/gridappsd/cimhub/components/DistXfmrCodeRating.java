@@ -9,10 +9,11 @@ import java.util.HashMap;
 import org.apache.commons.math3.complex.Complex;
 
 public class DistXfmrCodeRating extends DistComponent {
-  public String tname;
+  public static final String szCIMClass = "TransformerEndInfos";
+
+  public String name;
   public String id;
   public String[] eid;
-  public String[] ename;
   public int[] wdg;
   public String[] conn;
   public int[] ang;
@@ -29,7 +30,7 @@ public class DistXfmrCodeRating extends DistComponent {
   public String GetJSONEntry () {
     StringBuilder buf = new StringBuilder ();
 
-    buf.append ("{\"name\":\"" + tname +"\"");
+    buf.append ("{\"name\":\"" + name +"\"");
     buf.append (",\"mRID\":\"" + id +"\"");
     buf.append ("}");
     return buf.toString();
@@ -38,7 +39,6 @@ public class DistXfmrCodeRating extends DistComponent {
   private void SetSize (int val) {
     size = val;
     eid = new String[size];
-    ename = new String[size];
     wdg = new int[size];
     conn = new String[size];
     ang = new int[size];
@@ -50,13 +50,11 @@ public class DistXfmrCodeRating extends DistComponent {
   public DistXfmrCodeRating (ResultSet results, HashMap<String,Integer> map) {
     if (results.hasNext()) {
       QuerySolution soln = results.next();
-      String t = soln.get("?tname").toString();
-      tname = SafeName (t);
       id = soln.get("?id").toString();
-      SetSize (map.get(tname));
+      name = PushExportName (soln.get("?name").toString(), id, szCIMClass);
+      SetSize (map.get(id));
       for (int i = 0; i < size; i++) {
         eid[i] = soln.get("?eid").toString();
-        ename[i] = SafeName (soln.get("?ename").toString());
         wdg[i] = Integer.parseInt (soln.get("?enum").toString());
         conn[i] = soln.get("?conn").toString();
         ang[i] = Integer.parseInt (soln.get("?ang").toString());
@@ -71,7 +69,7 @@ public class DistXfmrCodeRating extends DistComponent {
   }
 
   public String DisplayString() {
-    StringBuilder buf = new StringBuilder (tname);
+    StringBuilder buf = new StringBuilder (id);
     for (int i = 0; i < size; i++) {
       buf.append ("\n  wdg=" + Integer.toString(wdg[i]) + " conn=" + conn[i] + " ang=" + Integer.toString(ang[i]));
       buf.append (" U=" + df4.format(ratedU[i]) + " S=" + df4.format(ratedS[i]) + " r=" + df4.format(r[i]));
@@ -93,8 +91,8 @@ public class DistXfmrCodeRating extends DistComponent {
     double zpu = 0.0;
     double zbase1 = ratedU[0] * ratedU[0] / ratedS[0];
     double zbase2 = ratedU[1] * ratedU[1] / ratedS[1];
-    if ((sct.ll[0] > 0.0) && (size < 3)) {
-      rpu = 1000.0 * sct.ll[0] / ratedS[0];
+    if ((sct.ll[0] > 0.0) && (size < 3)) { // sct.ll was on sct.sbase, but want rpu on ratedS
+      rpu = 1000.0 * sct.ll[0] * ratedS[0] / sct.sbase[0] / sct.sbase[0];
     } else {
       // hard-wired for SINGLE_PHASE_CENTER_TAPPED,
       // which is the only three-winding case that GridLAB-D supports
@@ -135,9 +133,9 @@ public class DistXfmrCodeRating extends DistComponent {
       double x3 = x2;
       if (size == 3) { // use the OpenDSS approach, should match Z23, should also work for non-interlaced
         double Sbase = ratedS[0];
-        double r12 = 1000.0 * sct.ll[0] / Sbase;
-        double r13 = 1000.0 * sct.ll[1] / Sbase;
-        double r23 = 1000.0 * sct.ll[2] / Sbase;
+        double r12 = 1000.0 * sct.ll[0] * Sbase / sct.sbase[0] / sct.sbase[0];  // convert from test base to winding 1 base
+        double r13 = 1000.0 * sct.ll[1] * Sbase / sct.sbase[1] / sct.sbase[1];
+        double r23 = 1000.0 * sct.ll[2] * Sbase / sct.sbase[2] / sct.sbase[2];
         zpu = sct.z[0] * Sbase / ratedU[0] / ratedU[0];
         double x12 = Math.sqrt(zpu*zpu - r12*r12);
         zpu = sct.z[1] * Sbase / ratedU[0] / ratedU[0];
@@ -164,7 +162,7 @@ public class DistXfmrCodeRating extends DistComponent {
     // as of v4.3, GridLAB-D implementing shunt_impedance for only two connection types
     if (sConnect.equals ("SINGLE_PHASE_CENTER_TAPPED") || sConnect.equals ("WYE_WYE")) {
       double puloss = 1000.0 * oct.nll / ratedS[0];
-      double puimag = 0.01 * oct.iexc;
+      double puimag = 0.01 * oct.iexc * oct.sbase / ratedS[0];
       if ((puloss > 0.0) && (puloss <= puimag)) {
         puimag = Math.sqrt(puimag * puimag - puloss * puloss);
       }
@@ -180,7 +178,7 @@ public class DistXfmrCodeRating extends DistComponent {
 
   private void AppendOneTank (StringBuilder buf, String name, String sKVA, boolean useA, boolean useB, boolean useC, String parms) {
     buf.append ("object transformer_configuration {\n");
-    buf.append ("  name \"xcon_" + name + "\";\n");
+    buf.append ("  name \"" + GLMObjectPrefix ("xcon_") + name + "\";\n");
     buf.append ("  power_rating " + sKVA + ";\n");
     if (useA) {
       buf.append ("  powerA_rating " + sKVA + ";\n");
@@ -208,11 +206,11 @@ public class DistXfmrCodeRating extends DistComponent {
     String sConnect = GetGldTransformerConnection (conn, size);
     String sKVA = df3.format (ratedS[0] * 0.001);
     if (sConnect.equals("SINGLE_PHASE_CENTER_TAPPED") || sConnect.equals("SINGLE_PHASE")) {
-      if (glmAUsed) AppendOneTank (buf, tname + "A", sKVA, true, false, false, parms);
-      if (glmBUsed) AppendOneTank (buf, tname + "B", sKVA, false, true, false, parms);
-      if (glmCUsed) AppendOneTank (buf, tname + "C", sKVA, false, false, true, parms);
+      if (glmAUsed) AppendOneTank (buf, name + "A", sKVA, true, false, false, parms);
+      if (glmBUsed) AppendOneTank (buf, name + "B", sKVA, false, true, false, parms);
+      if (glmCUsed) AppendOneTank (buf, name + "C", sKVA, false, false, true, parms);
     } else {
-      AppendOneTank (buf, tname, sKVA, false, false, false, parms);
+      AppendOneTank (buf, name, sKVA, false, false, false, parms);
     }
     return buf.toString();
   }
@@ -220,20 +218,26 @@ public class DistXfmrCodeRating extends DistComponent {
   // physical ohms to match the short circuit test load losses
   public void SetWindingResistances (DistXfmrCodeSCTest sct) {
     double r12pu, r13pu, r23pu, r1pu, r2pu, r3pu, Sbase;
-    Sbase = ratedS[0];
-    if (sct.size == 2) {
+    Sbase = sct.sbase[0]; // the per-unit manipulations have to be done on this common base
+    if (sct.size == 1) {
       r12pu = 1000.0 * sct.ll[0] / Sbase;
       r1pu = 0.5 * r12pu;
       r2pu = r1pu;
       r[0] = r1pu * ratedU[0] * ratedU[0] / Sbase;
       r[1] = r2pu * ratedU[1] * ratedU[1] / Sbase;
     } else if (sct.size == 3) {
-      r12pu = 1000.0 * sct.ll[0] / Sbase;
-      r13pu = 1000.0 * sct.ll[1] / Sbase;
-      r23pu = 1000.0 * sct.ll[2] / Sbase;
+      // test resistances on their own base
+      r12pu = 1000.0 * sct.ll[0] / sct.sbase[0];
+      r13pu = 1000.0 * sct.ll[1] / sct.sbase[1];
+      r23pu = 1000.0 * sct.ll[2] / sct.sbase[2];
+      // convert r13 and r23 to a common base
+      r13pu *= (Sbase / sct.sbase[1]);
+      r23pu *= (Sbase / sct.sbase[2]);
+      // determine the star equivalent in per-unit
       r1pu = 0.5 * (r12pu + r13pu - r23pu);
       r2pu = 0.5 * (r12pu + r23pu - r13pu);
       r3pu = 0.5 * (r13pu + r23pu - r12pu);
+      // convert to ohms from the common Sbase
       r[0] = r1pu * ratedU[0] * ratedU[0] / Sbase;
       r[1] = r2pu * ratedU[1] * ratedU[1] / Sbase;
       r[2] = r3pu * ratedU[2] * ratedU[2] / Sbase;
@@ -243,7 +247,7 @@ public class DistXfmrCodeRating extends DistComponent {
   public String GetDSS(DistXfmrCodeSCTest sct, DistXfmrCodeNLTest oct) {
     boolean bDelta;
     int phases = 3;
-    double zbase, xpct, zpct, rpct, pctloss, pctimag;
+    double zbase, xpct, zpct, rpct, pctloss, pctimag, pctiexc, rescale;
     int fwdg, twdg, i;
 
     for (i = 0; i < size; i++) {
@@ -251,17 +255,21 @@ public class DistXfmrCodeRating extends DistComponent {
         phases = 1;
       }
     }
-    StringBuilder buf = new StringBuilder("new Xfmrcode." + tname + " windings=" + Integer.toString(size) +
-                                          " phases=" + Integer.toString(phases));
+    StringBuilder buf = new StringBuilder("new Xfmrcode." + name + " windings=" + Integer.toString(size) +
+                        " phases=" + Integer.toString(phases));
 
-    // short circuit tests - valid only up to 3 windings
+    // short circuit tests - valid only up to 3 windings; put on the Winding 1 base
     for (i = 0; i < sct.size; i++) {
       fwdg = sct.fwdg[i];
       twdg = sct.twdg[i];
-      zbase = ratedU[fwdg-1] * ratedU[fwdg-1] / ratedS[fwdg-1];
+      zbase = ratedU[fwdg-1] * ratedU[fwdg-1] / sct.sbase[i];
       zpct = 100.0 * sct.z[i] / zbase;
-      rpct = 100.0 * 1000.0 * sct.ll[i] / ratedS[fwdg-1];
+      rpct = 100.0 * 1000.0 * sct.ll[i] / sct.sbase[i];
       xpct = Math.sqrt(zpct*zpct - rpct*rpct);
+      // convert rpct, xpct from the test base power to winding 1 base power
+      rescale = ratedS[0] / sct.sbase[i];
+      rpct *= rescale;
+      xpct *= rescale;
       if ((fwdg == 1 && twdg == 2) || (fwdg == 2 && twdg == 1)) {
         buf.append(" xhl=" + df6.format(xpct));
       } else if ((fwdg == 1 && twdg == 3) || (fwdg == 3 && twdg == 1)) {
@@ -270,12 +278,13 @@ public class DistXfmrCodeRating extends DistComponent {
         buf.append(" xlt=" + df6.format(xpct));
       }
     }
-    // open circuit test
+    // open circuit test, must put on winding 1 base for OpenDSS
     pctloss = 100.0 * 1000.0 * oct.nll / ratedS[0];
-    if ((pctloss > 0.0) && (pctloss <= oct.iexc)) {
-      pctimag = Math.sqrt(oct.iexc * oct.iexc - pctloss * pctloss);
+    pctiexc = oct.iexc * oct.sbase / ratedS[0];
+    if ((pctloss > 0.0) && (pctloss <= pctiexc)) {
+      pctimag = Math.sqrt(pctiexc * pctiexc - pctloss * pctloss);
     } else {
-      pctimag = oct.iexc;
+      pctimag = pctiexc;
     }
     buf.append (" %imag=" + df3.format(pctimag) + " %noloadloss=" + df3.format(pctloss) + "\n");
 
@@ -289,18 +298,18 @@ public class DistXfmrCodeRating extends DistComponent {
       }
       zbase = ratedU[i] * ratedU[i] / ratedS[0]; // PU impedances always on winding 1's kva base
       buf.append("~ wdg=" + Integer.toString(i + 1) + " conn=" + DSSConn(bDelta) +
-                 " kv=" + df3.format(0.001 * ratedU[i]) + " kva=" + df1.format(0.001 * ratedS[i]) +
-                 " %r=" + df6.format(100.0 * r[i] / zbase) + "\n");
+           " kv=" + df3.format(0.001 * ratedU[i]) + " kva=" + df1.format(0.001 * ratedS[i]) +
+           " %r=" + df6.format(100.0 * r[i] / zbase) + "\n");
     }
     return buf.toString();
   }
 
-  public static String szCSVHeader = "Name,NumWindings,NumPhases,Wdg1kV,Wdg1kVA,Wdg1Conn,Wdg1R,Wdg2kV,Wdg2kVA,Wdg2Conn,Wdg2R,Wdg3kV,Wdg3kVA,Wdg3Conn,Wdg3R,%x12,%x13,%x23,%imag,%NoLoadLoss";
+  public static String szCSVHeader = "Name,NumWindings,NumPhases,Wdg1kV,Wdg1kVA,Wdg1Conn,Wdg1R,Wdg1ClockAng,Wdg2kV,Wdg2kVA,Wdg2Conn,Wdg2R,Wdg2ClockAng,Wdg3kV,Wdg3kVA,Wdg3Conn,Wdg3R,Wdg3ClockAng,%x12,%x13,%x23,%imag,%NoLoadLoss";
 
   public String GetCSV (DistXfmrCodeSCTest sct, DistXfmrCodeNLTest oct) {
     boolean bDelta;
     int phases = 3;
-    double zbase, xpct, zpct, rpct, pctloss, pctimag;
+    double zbase, xpct, zpct, rpct, pctloss, pctimag, pctiexc, rescale;
     int fwdg, twdg, i;
 
     for (i = 0; i < size; i++) {
@@ -308,7 +317,7 @@ public class DistXfmrCodeRating extends DistComponent {
         phases = 1;
       }
     }
-    StringBuilder buf = new StringBuilder(tname + "," + Integer.toString(size) + "," + Integer.toString(phases));
+    StringBuilder buf = new StringBuilder(name + "," + Integer.toString(size) + "," + Integer.toString(phases));
 
     // winding ratings: kV, kVA, Conn, R
     SetWindingResistances (sct);
@@ -320,19 +329,23 @@ public class DistXfmrCodeRating extends DistComponent {
       }
       zbase = ratedU[i] * ratedU[i] / ratedS[i];
       buf.append ("," + df3.format(0.001 * ratedU[i]) + "," + df1.format(0.001 * ratedS[i]) + "," + DSSConn(bDelta) +
-                 "," + df6.format(100.0 * r[i] / zbase));
+           "," + df6.format(100.0 * r[i] / zbase) + "," + Integer.toString(ang[i]));
     }
     if (size < 3) buf.append (",,,");
 
-    // short circuit tests - valid only up to 3 windings
+    // short circuit tests - valid only up to 3 windings; put on winding 1 base
     double x12 = 0.0, x13 = 0.0, x23 = 0.0;
     for (i = 0; i < sct.size; i++) {
       fwdg = sct.fwdg[i];
       twdg = sct.twdg[i];
-      zbase = ratedU[fwdg-1] * ratedU[fwdg-1] / ratedS[fwdg-1];
+      zbase = ratedU[fwdg-1] * ratedU[fwdg-1] / sct.sbase[i];
       zpct = 100.0 * sct.z[i] / zbase;
-      rpct = 100.0 * 1000.0 * sct.ll[i] / ratedS[fwdg-1];
+      rpct = 100.0 * 1000.0 * sct.ll[i] / sct.sbase[i];
       xpct = Math.sqrt(zpct*zpct - rpct*rpct);
+      // convert rpct, xpct from the test base power to winding 1 base power
+      rescale = ratedS[0] / sct.sbase[i];
+      rpct *= rescale;
+      xpct *= rescale;
       if ((fwdg == 1 && twdg == 2) || (fwdg == 2 && twdg == 1)) {
         x12 = xpct;
       } else if ((fwdg == 1 && twdg == 3) || (fwdg == 3 && twdg == 1)) {
@@ -343,19 +356,20 @@ public class DistXfmrCodeRating extends DistComponent {
     }
     buf.append ("," + df6.format(x12) + "," + df6.format(x13) + "," + df6.format(x23));
 
-    // open circuit test
+    // open circuit test; put on winding 1 base
     pctloss = 100.0 * 1000.0 * oct.nll / ratedS[0];
-    if ((pctloss > 0.0) && (pctloss <= oct.iexc)) {
-      pctimag = Math.sqrt(oct.iexc * oct.iexc - pctloss * pctloss);
+    pctiexc = oct.iexc * oct.sbase / ratedS[0];
+    if ((pctloss > 0.0) && (pctloss <= pctiexc)) {
+      pctimag = Math.sqrt(pctiexc * pctiexc - pctloss * pctloss);
     } else {
-      pctimag = oct.iexc;
+      pctimag = pctiexc;
     }
     buf.append ("," + df3.format(pctimag) + "," + df3.format(pctloss) + "\n");
     return buf.toString();
   }
 
   public String GetKey() {
-    return tname;
+    return id;
   }
 }
 

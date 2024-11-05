@@ -1,15 +1,17 @@
 package gov.pnnl.gridappsd.cimhub.components;
-//	----------------------------------------------------------
-//	Copyright (c) 2021-22, Battelle Memorial Institute
-//	All rights reserved.
-//	----------------------------------------------------------
+//  ----------------------------------------------------------
+//  Copyright (c) 2021-22, Battelle Memorial Institute
+//  All rights reserved.
+//  ----------------------------------------------------------
 
 import org.apache.jena.query.*;
 import java.util.HashMap;
 
 public class DistIEEE1547Used extends DistComponent {
-	public String id;
-	public String name;
+  public static final String szCIMClass = "DERIEEEType1";
+
+  public String id;
+  public String name;
   public boolean enabled;
   public String cat;
   public String pecid;
@@ -81,19 +83,19 @@ public class DistIEEE1547Used extends DistComponent {
   public double vwP2load;
   public double vwOlrt;
 
-	public String GetJSONEntry () {
-		StringBuilder buf = new StringBuilder ();
+  public String GetJSONEntry () {
+    StringBuilder buf = new StringBuilder ();
 
-		buf.append ("{\"name\":\"" + name +"\"");
-		buf.append("}");
-		return buf.toString();
-	}
+    buf.append ("{\"name\":\"" + name +"\"");
+    buf.append("}");
+    return buf.toString();
+  }
 
-	public DistIEEE1547Used (ResultSet results) {
-		if (results.hasNext()) {
-			QuerySolution soln = results.next();
-			name = SafeName (soln.get("?name").toString());
-			id = soln.get("?id").toString();
+  public DistIEEE1547Used (ResultSet results) {
+    if (results.hasNext()) {
+      QuerySolution soln = results.next();
+      id = soln.get("?id").toString();
+      name = PushExportName (soln.get("?name").toString(), id, szCIMClass);
       pecid = soln.get("?pecid").toString();
       enabled = Boolean.parseBoolean (soln.get("?enabled").toString());
       cat = soln.get("?cat").toString();
@@ -164,12 +166,12 @@ public class DistIEEE1547Used extends DistComponent {
       vwP2gen = Double.parseDouble (soln.get("?vwP2gen").toString());
       vwP2load = Double.parseDouble (soln.get("?vwP2load").toString());
       vwOlrt = Double.parseDouble (soln.get("?vwOlrt").toString());
-		}		
-	}
-	
-	public String DisplayString() {
-		StringBuilder buf = new StringBuilder ("");
-		buf.append (name + " cat=" + cat + " enabled=" + Boolean.toString(enabled) + " pf=" + Boolean.toString(pfEnabled));
+    }   
+  }
+  
+  public String DisplayString() {
+    StringBuilder buf = new StringBuilder ("");
+    buf.append (name + " cat=" + cat + " enabled=" + Boolean.toString(enabled) + " pf=" + Boolean.toString(pfEnabled));
     buf.append (" cq=" + Boolean.toString(cqEnabled) + " vv=" + Boolean.toString(vvEnabled));
     buf.append (" vw=" + Boolean.toString(vwEnabled) + " wv=" + Boolean.toString(wvEnabled) + " vvRefAuto=" + Boolean.toString(vvRefAuto));
     if (vwEnabled) {
@@ -177,11 +179,11 @@ public class DistIEEE1547Used extends DistComponent {
         buf.append (" combo=" + Boolean.toString (true));
       }
     }
-		return buf.toString();
-	}
+    return buf.toString();
+  }
 
-	public String GetGLM (double const_q, double const_pf) {
-		StringBuilder buf = new StringBuilder ("");
+  public String GetGLM (double const_q, double const_pf) {
+    StringBuilder buf = new StringBuilder ("");
     if (vvEnabled) {
       buf.append ("  four_quadrant_control_mode VOLT_VAR;\n");
       buf.append ("  V1 " + df3.format(vvV1) + ";\n");
@@ -221,22 +223,22 @@ public class DistIEEE1547Used extends DistComponent {
       buf.append ("  four_quadrant_control_mode CONSTANT_PQ;\n");
       buf.append ("  Q_Out " + df3.format (const_q) + ";\n");
     }
-		return buf.toString();
-	}
+    return buf.toString();
+  }
 
-	public String GetKey() {
-		return name;
-	}
+  public String GetKey() {
+    return id;
+  }
 
   public String GetExpControl() {
     StringBuilder buf = new StringBuilder("new ExpControl." + name + " // " + cat + " " + id + "\n");
     double slope = (vvQ2 - vvQ3) / (vvV3 - vvV2);
-//    buf.append ("~ vreg=" + df4.format(vvRef) + " slope=" + df4.format(slope) + " vregtau=" + df2.format(vvRefOlrt) + " Tresponse=" + df2.format(vvOlrt) + " deltaQ_factor=0.3\n");
+//  buf.append ("~ vreg=" + df4.format(vvRef) + " slope=" + df4.format(slope) + " vregtau=" + df2.format(vvRefOlrt) + " Tresponse=" + df2.format(vvOlrt) + " deltaQ_factor=0.3\n");
     buf.append ("~ vreg=0.0 slope=" + df4.format(slope) + " vregtau=" + df2.format(vvRefOlrt) + " Tresponse=" + df2.format(vvOlrt) + " deltaQ_factor=0.3\n");
     return buf.toString();
   }
 
-	public String GetDSS (boolean bStorage) {
+  public String GetDSS (boolean bStorage) {
     if (vvEnabled && vvRefAuto) {
       return GetExpControl();
     }
@@ -260,9 +262,9 @@ public class DistIEEE1547Used extends DistComponent {
     }
     if (wvEnabled) {
       buf.append("new XyCurve." + name + "_wattvar npts=8 Yarray=[" + df4.format (wvQ3load) + " " + df4.format (wvQ3load) + " " + df4.format (wvQ2load) + " " + df4.format (wvQ1load) +
-                 " " + df4.format (wvQ1gen) + " " + df4.format (wvQ2gen) + " " + df4.format (wvQ3gen) + " " + df4.format (wvQ3gen) + "]\n");
+           " " + df4.format (wvQ1gen) + " " + df4.format (wvQ2gen) + " " + df4.format (wvQ3gen) + " " + df4.format (wvQ3gen) + "]\n");
       buf.append("~ Xarray=[-2.0 " + df4.format (wvP3load) + " " + df4.format (wvP2load) + " " + df4.format (wvP1load) +
-                 " " + df4.format (wvP1gen) + " " + df4.format (wvP2gen) + " " + df4.format (wvP3gen) + " 2.0]\n");
+           " " + df4.format (wvP1gen) + " " + df4.format (wvP2gen) + " " + df4.format (wvP3gen) + " 2.0]\n");
     }
     buf.append("new InvControl." + name + " // " + cat + " " + id + "\n");
     if (vvEnabled && vwEnabled) {
@@ -280,9 +282,9 @@ public class DistIEEE1547Used extends DistComponent {
       buf.append ("~ mode=WATTVAR voltage_curvex_ref=rated wattvar_curve=" + name + "_wattvar\n");
     }
     return buf.toString();
-	}
+  }
 
-  public static String szCSVHeader = "Name,Enabled,Cat,acVnom,acVmin,acVmax,sMaxpMaxOverPF,overPF,pMaxUnderPF,underPF,qMaxInj,"+
+  public static String szCSVHeader = "Name,Enabled,Cat,acVnom,acVmin,acVmax,sMax,pMax,pMaxOverPF,overPF,pMaxUnderPF,underPF,qMaxInj,"+
    "qMaxAbs,pMaxCharge,apparentPowerChargeMax,usePG,usePN,usePP,hasConstPF,hasConstQ,hasPV,hasPF,hasQV,hasQP,"+
    "vvEnabled,vvV1,vvV2,vvV3,vvV4,vvQ1,vvQ2,vvQ3,vvQ4,vvRef,vvRefAuto,vvRefOlrt,vvOlrt,"+
    "wvEnabled,wvP1gen,wvP2gen,wvP3gen,wvQ1gen,wvQ2gen,wvQ3gen,wvP1load,wvP2load,wvP3load,wvQ1load,wvQ2load,wvQ3load,"+
@@ -296,10 +298,10 @@ public class DistIEEE1547Used extends DistComponent {
     buf.append ("," + df2.format (acVmax));
     buf.append ("," + df2.format (sMax));
     buf.append ("," + df2.format (pMax));
-    buf.append ("," + df2.format (pMaxUnderPF));
     buf.append ("," + df2.format (pMaxOverPF));
-    buf.append ("," + df4.format (underPF));
     buf.append ("," + df4.format (overPF));
+    buf.append ("," + df2.format (pMaxUnderPF));
+    buf.append ("," + df4.format (underPF));
     buf.append ("," + df2.format (qMaxInj));
     buf.append ("," + df2.format (qMaxAbs));
     buf.append ("," + df2.format (pMaxCharge));
@@ -352,8 +354,8 @@ public class DistIEEE1547Used extends DistComponent {
 
     buf.append ("," + Boolean.toString (vwEnabled));
     buf.append ("," + df3.format (vwV1));
-    buf.append ("," + df3.format (vwV2));
     buf.append ("," + df3.format (vwP1));
+    buf.append ("," + df3.format (vwV2));
     buf.append ("," + df3.format (vwP2gen));
     buf.append ("," + df3.format (vwP2load));
     buf.append ("," + df4.format (vwOlrt));

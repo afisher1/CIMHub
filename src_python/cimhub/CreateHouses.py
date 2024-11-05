@@ -81,6 +81,7 @@ class CreateHouses():
         regionStr = self._getRegionStr(region=region)
         
         # Read data.
+        print ('looking for', THIS_DIR + os.sep + DATA_DIR + os.sep + OUTFILE)
         data = pd.read_json(THIS_DIR + os.sep + DATA_DIR + os.sep + OUTFILE)
         
         # Extract data only for the given region.
@@ -150,17 +151,12 @@ class CreateHouses():
             module, and so the inputs are taken in a form they exist there.
         
         INPUTS:
-        loadDf: pandas dataframe, indices are names of loads, and column 'magS'
-            indicates apaprent power magnitude under peak conditions
+        loadDf: pandas dataframe, indices are names of loads, and column 'magS' indicates apaprent power magnitude under peak conditions
         magS: total magnitude of all loads [MVA]
         scale:  scaling factor on the number of houses placed, to mitigate overloads
         
         OUTPUT:
-        housingDict: dictionary with nodes/loads (index from loadDf) as keys.
-            Each key maps to a two-element tuple - the first is a dataframe
-            containing housing data and the second is the chosen housing type
-            code (see eia_recs.housingData.TYPEHUQ). Using the code instead of
-            the full name for efficiency.
+        housingDict: dictionary with nodes/loads (index from loadDf) as keys. Each key maps to a two-element tuple - the first is a dataframe containing housing data and the second is the chosen housing type code (see eia_recs.housingData.TYPEHUQ). Using the code instead of the full name for efficiency.
             
         note: We may want to use a different datatype other than a dictionary.
             When we loop back over the items, this will be inefficient as 
@@ -246,7 +242,7 @@ class CreateHouses():
             self.houseCount[housingType] += n
             
         # Print totals to the log. 
-        self.log.info(('{} loads were accounted for, totaling {} '
+        self.log.info(('Finally {} loads were accounted for, totaling {} '
                        + 'housing units').format(self.loadCount,
                                                  self.houseCount.sum())
                        )
@@ -260,14 +256,11 @@ class CreateHouses():
     def drawThermalIntegrity(self, housingType, n):
         """Decide thermal integrity levels for 'n' houses.
         
-        housingType: string (from self.data['TYPEHUQ'].index) representing
-            housing type.
+        housingType: string (from self.data['TYPEHUQ'].index) representinghousing  type.
         n: number of houses to determine properties for.
         
         OUTPUTS:
-        thermalIntegrity: pandas Series indicating thermal integrity level for
-            each of the 'n' housing units. Options (from GridLAB-D,
-            http://gridlab-d.shoutwiki.com/wiki/Thermal_integrity_level) are:
+        thermalIntegrity: pandas Series indicating thermal integrity level for each of the 'n' housing units. Options (from GridLAB-D, http://gridlab-d.shoutwiki.com/wiki/Thermal_integrity_level) are:
             
             'veryLittle': old, uninsulated
             'little': old, insulated
@@ -276,8 +269,7 @@ class CreateHouses():
             'aboveNormal': moderately insulated
             'good': very well insulated
             'veryGood': extermely well insulated
-            'unknown': unkown. "Built-in defaults or user-specified values are
-                used."
+            'unknown': unkown. "Built-in defaults or user-specified values are used."
                 
         NOTES:
         We'll be using three parameters to make a decision here:
@@ -286,9 +278,7 @@ class CreateHouses():
         year made will decide if house is 'old' or not, adequate insulation
         will determine 'insulated,' and 'drafty' will determine weatherized.
         
-        TODO: I don't love this one... The mapping is too.. hand-wavy. Maybe
-            instead of this intersection method we could come up with a 'score'
-            where equal points are possible from the three categories?
+        TODO: I don't love this one... The mapping is too.. hand-wavy. Maybe instead of this intersection method we could come up with a 'score' where equal points are possible from the three categories?
         TODO: Get someone to review and weigh in.
         """
         # Grab pointer to relevant data for readability.
@@ -313,11 +303,11 @@ class CreateHouses():
                                            p=pD).astype(int))
         
         # Initialize return.
-        thermalIntegrity = pd.Series(index=year.index)
+        thermalIntegrity = pd.Series(dtype='float64', index=year.index)
         
         # Loop and select thermalIntegrity based on the combination of year,
         # insul, and draft.
-        for index, y in year.iteritems():
+        for index, y in year.items():
             # Grab other information.
             i = insul.iloc[index]
             d = draft.iloc[index]
@@ -400,14 +390,11 @@ class CreateHouses():
         """Draw number of stories for 'n' houses.
         
         INPUTS:
-        housingType: string (from self.data['TYPEHUQ'].index) representing
-            housing type.
+        housingType: string (from self.data['TYPEHUQ'].index) representing housing type.
         n: number of houses to determine properties for.
         
         OUTPUTS:
-        numberOfStories: pandas Series indicating the number of stories for
-            each of the 'n' housing units. Note that mobile homes and
-            apartments will always be 1 story.
+        numberOfStories: pandas Series indicating the number of stories for each of the 'n' housing units. Note that mobile homes and apartments will always be 1 story.
         """
         # If housing type has one story be definition, set and return.
         if housingType in ['Mobile home',
@@ -443,19 +430,13 @@ class CreateHouses():
         """Draw all heating related parameters for 'n' houses.
         
         INPUTS:
-        coolingSystem: one of the returns from "drawAC." Used for heat 
-            pumps.
-        housingType: string (from self.data['TYPEHUQ'].index) representing
-            housing type.
+        coolingSystem: one of the returns from "drawAC." Used for heat pumps.
+        housingType: string (from self.data['TYPEHUQ'].index) representing housing type.
         n: number of houses to determine properties for.
         
         OUTPUTS:
-        heatingSystem: pandas Series with a string for each of the 'n' housing
-            units. Options are 'none,' 'electric,' 'heatPump,' or 'gas.'
-        heatingSetpoint: pandas Series with a number for each of the 'n' 
-            housing units. Represents heating setpoint in degrees F. If the
-            corresponding heating system is 'none,' the setpoint will be
-            np.nan 
+        heatingSystem: pandas Series with a string for each of the 'n' housing units. Options are 'none,' 'electric,' 'heatPump,' or 'gas.'
+        heatingSetpoint: pandas Series with a number for each of the 'n' housing units. Represents heating setpoint in degrees F. If the corresponding heating system is 'none,' the setpoint will be np.nan 
         """
         
         # Grab pointer to relevant data for readability.
@@ -477,8 +458,8 @@ class CreateHouses():
         
         # Map combination of hasHeat and heatType into 'none,' 'gas,'
         # 'heatPump,' or 'resistance'
-        heatingSystem = pd.Series(index=heatType.index)
-        for index, hH in hasHeat.iteritems():
+        heatingSystem = pd.Series(dtype='float64', index=heatType.index)
+        for index, hH in hasHeat.items():
             # Grab type
             hT = heatType.iloc[index]
             
@@ -544,17 +525,12 @@ class CreateHouses():
         """Draw all AC related parameters for 'n' houses.
         
         INPUTS:
-        housingType: string (from self.data['TYPEHUQ'].index) representing
-            housing type.
+        housingType: string (from self.data['TYPEHUQ'].index) representing housing type.
         n: number of houses to determine properties for.
         
         OUTPUTS:
-        coolingSystem: pandas Series which containes either 'electric' for 
-            standard AC, 'none' if there's no cooling, or 'heatPump' if the AC
-            is from a heatpump.
-        coolingSetpoint: pandas Series containing a thermostat cooling setpoint
-            (in degrees F) for each home. np.nan will be used for homes with
-            'none' in coolingSystem
+        coolingSystem: pandas Series which containes either 'electric' for  standard AC, 'none' if there's no cooling, or 'heatPump' if the AC is from a heatpump.
+        coolingSetpoint: pandas Series containing a thermostat cooling setpoint (in degrees F) for each home. np.nan will be used for homes with 'none' in coolingSystem
         """
         # Grab pointer to relevant data for readability.
         data = self.data[housingType]
@@ -573,8 +549,8 @@ class CreateHouses():
         # Map combination of hasAC and isHP into coolingSystem return.
         # NOTE: attempt to use Series.combine didn't work because mapping ints
         # to strings failed.
-        coolingSystem = pd.Series(index=hasAC.index)
-        for index, hS in hasAC.iteritems():
+        coolingSystem = pd.Series(dtype='float64', index=hasAC.index)
+        for index, hS in hasAC.items():
             # Grab pointers to heatpump value
             HP = isHP.iloc[index]
             
@@ -608,8 +584,7 @@ class CreateHouses():
         
         OUTPUTS:
         housingType: Selected housing type string.
-        housingCode: index from TYPEHUQ that matches up with the housingType
-            string
+        housingCode: index from TYPEHUQ that matches up with the housingType string
         floorArea: pandas Series of square footages for houses to be added.
         """
         # Grab the denominator needed to normalize self.housing.
@@ -626,7 +601,7 @@ class CreateHouses():
                               + 'depleted, falling back on the initial '
                               + 'distribution, which will cause deviations '
                               + 'from the distribution since.')
-                self.log.info(('{} loads were accounted for, totaling {} '
+                self.log.info(('  {} loads were accounted for, totaling {} '
                                + 'housing units').format(self.loadCount,
                                                          self.houseCount.sum())
                                )
@@ -705,8 +680,7 @@ class CreateHouses():
             
         INPUTS:
         pmf: probability mass function (sums to 1) for the distribution
-        bin_edges: edges for binned data. These should have originated from a
-            call to numpy's histogram function.
+        bin_edges: edges for binned data. These should have originated from a call to numpy's histogram function.
         """
         # Draw a bin. Note that bin_edges has one more element than pmf.
         leftInd = self.rand.choice(np.arange(0, len(pmf)), p=pmf)

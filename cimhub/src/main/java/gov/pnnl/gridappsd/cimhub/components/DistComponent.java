@@ -10,11 +10,14 @@ import org.apache.commons.math3.complex.Complex;
 import java.text.DecimalFormat;
 import java.util.HashMap;
 import gov.pnnl.gridappsd.cimhub.components.ConverterControlMode;
+import gov.pnnl.gridappsd.cimhub.components.ExportNameMode;
 
 public abstract class DistComponent {
   public static String nsCIM = "http://iec.ch/TC57/CIM100#";
   public static final String nsRDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
   public static final String nsXSD = "http://www.w3.org/2001/XMLSchema#";
+
+  public static ExportNameMode gExportNames = ExportNameMode.SAFENAME;
 
   static double gFREQ = 60.0;
   static double gOMEGA = gFREQ * 2.0 * Math.PI; // 376.9911
@@ -27,14 +30,15 @@ public abstract class DistComponent {
   static final DecimalFormat df4 = new DecimalFormat("#0.0000");
   static final DecimalFormat df5 = new DecimalFormat("#0.00000");
   static final DecimalFormat df6 = new DecimalFormat("#0.000000");
+  static final DecimalFormat df9 = new DecimalFormat("#0.000000000");
   static final DecimalFormat df12 = new DecimalFormat("#0.000000000000");
 
-//  public static ResultSet RunQuery (String szQuery) {
-//    String qPrefix = "PREFIX r: <" + nsRDF + "> PREFIX c: <" + nsCIM + "> PREFIX xsd:<" + nsXSD + "> ";
-//    Query query = QueryFactory.create (qPrefix + szQuery);
-//    QueryExecution qexec = QueryExecutionFactory.sparqlService (szEND, query);
-//    return qexec.execSelect();
-//  }
+  public static HashMap<String,DistBus> mapBusNames = new HashMap<>();
+  public static HashMap<String,DistEquipment> mapEquipmentNames = new HashMap<>();
+
+  public static void SetExportNames (ExportNameMode choice) {
+    gExportNames = choice;
+  }
 
   public static void SetSystemFrequency (double freq) {
     gFREQ = freq;
@@ -68,7 +72,7 @@ public abstract class DistComponent {
   }
 
   static double OptionalDouble (QuerySolution soln, String parm, double def) {
-    RDFNode nd = soln.get(parm);
+  RDFNode nd = soln.get(parm);
     if (nd != null) {
       String str = nd.toString();
       if (str.length() > 0) {
@@ -94,6 +98,9 @@ public abstract class DistComponent {
    *  @return nd_arg
    */
   static String GldBusName (String arg) {
+    if (gExportNames == ExportNameMode.MRID) {
+      return arg;
+    }
     return "nd_" + arg;
   }
 
@@ -102,7 +109,7 @@ public abstract class DistComponent {
    *  @param arg the root bus or component name, aka CIM name
    *  @return the compatible name for GridLAB-D or OpenDSS
    */  
-  public static String SafeName (String arg) {      // GLD conversion
+  public static String SafeName (String arg) {    // GLD conversion
     if (arg == null) {
       return null;
     }
@@ -118,9 +125,47 @@ public abstract class DistComponent {
     s = s.replace (']', '_');
     s = s.replace ('{', '_');
     s = s.replace ('}', '_');
-    s = s.replace ('(', '_');
-    s = s.replace (')', '_');
+//    s = s.replace ('(', '_');
+//    s = s.replace (')', '_');
     return s;
+  }
+
+  public static String MakeExportName (String name, String id) {
+    switch (gExportNames) {
+    case SAFENAME:
+      return SafeName (name);
+    case NAME:
+      return name;
+    case MRID:
+      return id;
+    }
+    return name;
+  }
+
+  public static String PushExportName (String name, String id, String eqClass) {
+    String exportName = MakeExportName (name, id);
+    mapEquipmentNames.put (id, new DistEquipment (name, id, exportName, eqClass));
+    return exportName;
+  }
+
+  public static String GetBusExportName (String id) throws RuntimeException {
+    Boolean isValidId = mapBusNames.containsKey(id);
+    if (isValidId) {
+      return mapBusNames.get(id).exportName;
+    } else {
+      String errMsg = String.format("There is no bus with id of %s in the model!", id);
+      throw new RuntimeException(errMsg);
+    }
+  }
+
+  public static String GetEquipmentExportName (String id) throws RuntimeException{
+	Boolean isValidId = mapEquipmentNames.containsKey(id);
+	if (isValidId) {
+		return mapEquipmentNames.get(id).exportName;
+	} else {
+		String errMsg = String.format("There is no piece of equipment with id of %s in the model!", id);
+	    throw new RuntimeException(errMsg);
+	}
   }
 
   public static ConverterControlMode ParseControlMode (String arg) {
@@ -135,20 +180,13 @@ public abstract class DistComponent {
     return s;
   }
 
-  static String GLMClassPrefix (String t) {  // GLD conversion
-    if (t.equals("LinearShuntCompensator")) return "cap";
-    if (t.equals("ACLineSegment")) return "line"; // assumes we prefix both overhead and underground with line_
-    if (t.equals("EnergyConsumer")) return "";  // TODO should we name load:?
-    if (t.equals("PowerTransformer")) return "xf";
-    return "##UNKNOWN##";
+  // only used for SAFENAME and NAME, which may not be unique
+  public static String GLMObjectPrefix (String t, boolean bForce) { 
+    if ((gExportNames == ExportNameMode.MRID) && !bForce) return "";
+    return t;
   }
-
-  static String DSSClassPrefix (String t) {  // DSS conversion
-    if (t.equals("LinearShuntCompensator")) return "capacitor";
-    if (t.equals("ACLineSegment")) return "line";
-    if (t.equals("EnergyConsumer")) return "load";
-    if (t.equals("PowerTransformer")) return "transformer";
-    return "##UNKNOWN##";
+  public static String GLMObjectPrefix (String t) {
+    return GLMObjectPrefix (t, false);
   }
 
   static String FirstDSSPhase (String phs) {
@@ -167,7 +205,7 @@ public abstract class DistComponent {
     if ((nphases < 3) && bDelta) {
       nphases = 1;
     }
-//    System.out.println (phs + "," + Boolean.toString(bDelta) + "," + Integer.toString(nphases));
+  //  System.out.println (phs + "," + Boolean.toString(bDelta) + "," + Integer.toString(nphases));
     return nphases;
   }
 
@@ -195,22 +233,22 @@ public abstract class DistComponent {
     if (!bDelta) {
       return DSSBusPhases(bus, phs);
     }
-//    if (phs_cnt == 1) {
-      if (phs.contains ("A")) {
-        return bus + ".1.2";
-      } else if (phs.contains ("B")) {
-        return bus + ".2.3";
-      } else if (phs.contains ("C")) {
-        return bus + ".3.1";
-      }
-//    }
-    // TODO - can we have two-phase delta in the CIM?
-//    if (phs.contains ("AB")) {
-//      return ".1.2.3";
-//    } else if (phs.contains ("AC")) {
-//      return ".3.1.2";
-//    }
-    // phs.contains ("BC")) for 2-phase delta
+//  if (phs_cnt == 1) {
+    if (phs.contains ("A")) {
+      return bus + ".1.2";
+    } else if (phs.contains ("B")) {
+      return bus + ".2.3";
+    } else if (phs.contains ("C")) {
+      return bus + ".3.1";
+    }
+//  }
+  // TODO - can we have two-phase delta in the CIM?
+//  if (phs.contains ("AB")) {
+//    return ".1.2.3";
+//  } else if (phs.contains ("AC")) {
+//    return ".3.1.2";
+//  }
+  // phs.contains ("BC")) for 2-phase delta
     return bus;// ".2.3.1";
   }
 
@@ -468,7 +506,7 @@ public abstract class DistComponent {
 
   /** 
    *  Rotates a phasor +120 degrees by multiplication
-     */
+   */
   static final Complex pos120 = new Complex (-0.5, 0.5 * Math.sqrt(3.0));
 
   /** 
@@ -479,7 +517,7 @@ public abstract class DistComponent {
   /** 
    *  @param c complex number
    *  @return formatted string for GridLAB-D input files with 'j' at the end
-     */
+   */
   static String CFormat (Complex c) {
     String sgn;
     if (c.getImaginary() < 0.0)  {
@@ -499,8 +537,7 @@ public abstract class DistComponent {
     if (nwdg == 3) {
       if (conn[0].equals("I") && conn[1].equals("I") && conn[1].equals("I")) return "SINGLE_PHASE_CENTER_TAPPED"; // supported in GridLAB-D
     }
-    if (conn[0].equals("D"))
-    {
+    if (conn[0].equals("D")) {
       if (conn[1].equals("D"))  {
         return "DELTA_DELTA";  // supported in GridLAB-D
       } else if (conn[1].equals("Y")) {

@@ -8,6 +8,8 @@ import org.apache.jena.query.*;
 import java.util.HashMap;
 
 public class DistMeasurement extends DistComponent {
+  public static final String szCIMClass = "Measurement";
+
   public String id;
   public String eqid;
   public String trmid;
@@ -24,19 +26,22 @@ public class DistMeasurement extends DistComponent {
   public DistMeasurement (ResultSet results, boolean useHouses) {
     if (results.hasNext()) {
       QuerySolution soln = results.next();
-      name = SafeName (soln.get("?name").toString());
-      eqname = SafeName (soln.get("?eqname").toString());
-      eqtype = SafeName (soln.get("?eqtype").toString());
-      measType = SafeName (soln.get("?type").toString());
-      measClass = SafeName (soln.get("?class").toString());
       id = soln.get("?id").toString();
+      name = PushExportName (soln.get("?name").toString(), id, szCIMClass);
+      eqtype = soln.get("?eqtype").toString();
+      measType = soln.get("?type").toString();
+      measClass = soln.get("?class").toString();
       eqid = soln.get("?eqid").toString();
       trmid = soln.get("?trmid").toString();
-      bus = SafeName (soln.get("?bus").toString());
+      bus = GetBusExportName (soln.get("?bus").toString());
       phases = OptionalString (soln, "?phases", "ABC");
     }
     this.useHouses = useHouses;
-//    System.out.println (DisplayString());
+  //  System.out.println (DisplayString());
+  }
+
+  public void PrepForExport() {
+    eqname = GetEquipmentExportName (eqid);
   }
 
   public String GetGldLoadName () {
@@ -49,46 +54,42 @@ public class DistMeasurement extends DistComponent {
   }
 
   public void FindSimObject (String loadname, String busphases, boolean bStorage, boolean bSolar, boolean bSyncMachines) {
-    if (eqtype.equals ("LinearShuntCompensator")) {
-      simobj = "cap_" + eqname;
-    } else if (eqtype.equals ("PowerElectronicsConnection")) {
-      if (bStorage) {
-        if (measType.equals ("SoC")) {
-          simobj = "bat_" + eqname;
-        } else {
-          simobj = bus + "_stmtr";
-        }
-      } else if (bSolar) {
-        simobj = bus + "_pvmtr";
-      } else {
-        simobj = "UKNOWN INVERTER";
-      }
-    } else if (eqtype.equals("ACLineSegment")) {
-      if (phases.contains("s")) {
-        simobj = "tpx_" + eqname;
-      } else {
-        simobj = "line_" + eqname;
-      }
-    } else if (eqtype.equals ("PowerTransformer")) { // RatioTapChanger or PowerTransformer
-      if (measClass.equals("Discrete")) {
-        simobj = "reg_" + eqname;
-      } else {
-        simobj = "xf_" + eqname;
-      }
-    } else if (eqtype.equals("LoadBreakSwitch")) {
-      simobj = "swt_" + eqname;
-    } else if (eqtype.equals ("Recloser")) {
-      simobj = "swt_" + eqname;
-    } else if (eqtype.equals ("Breaker")) {
-      simobj = "swt_" + eqname;
-    } else if (eqtype.equals ("SynchronousMachine")) {
-      simobj = bus + "_dgmtr";
-    } else if (eqtype.equals ("EnergyConsumer")) {
-      simobj = loadname;
-    } else {
-      simobj = "UKNOWN";
-    }
-  }
+		if (eqtype.equals ("LinearShuntCompensator")) {
+			simobj = "cap_" + eqname;
+		} else if (eqtype.equals ("PowerElectronicsConnection")) {
+			if (bStorage) {
+				if (measType.equals ("SoC")) {
+					simobj = "bat_" + eqname;
+				} else {
+					simobj = bus + "_stmtr";
+				}
+			} else if (bSolar) {
+				simobj = bus + "_pvmtr";
+			} else {
+				simobj = "UKNOWN INVERTER";
+			}
+		} else if (eqtype.equals("ACLineSegment")) {
+			if (phases.contains("s")) {
+				simobj = "tpx_" + eqname;
+			} else {
+				simobj = "line_" + eqname;
+			}
+		} else if (eqtype.equals ("PowerTransformer")) { // RatioTapChanger or PowerTransformer
+			simobj = "xf_" + eqname;
+		} else if (eqtype.equals("LoadBreakSwitch")) {
+			simobj = "swt_" + eqname;
+		} else if (eqtype.equals ("Recloser")) {
+			simobj = "swt_" + eqname;
+		} else if (eqtype.equals ("Breaker")) {
+			simobj = "swt_" + eqname;
+		} else if (eqtype.equals ("SynchronousMachine")) {
+			simobj = bus + "_dgmtr";
+		} else if (eqtype.equals ("EnergyConsumer")) {
+			simobj = loadname;
+		} else {
+			simobj = "UKNOWN";
+		}
+	}
 
   public boolean LinkedToSimulatorObject () {
     if (simobj != null) {
@@ -124,7 +125,7 @@ public class DistMeasurement extends DistComponent {
   public String DisplayString() {
     StringBuilder buf = new StringBuilder ("");
     buf.append (name + ":" + id + ":" + eqid + ":" + trmid + ":" + measType + ":" + phases
-                 + ":" + measClass + ":" + eqtype + ":" + eqname + ":" + bus + ":" + useHouses);
+           + ":" + measClass + ":" + eqtype + ":" + eqname + ":" + bus + ":" + useHouses);
     return buf.toString();
   }
 

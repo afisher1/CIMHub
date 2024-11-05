@@ -1,11 +1,12 @@
 package gov.pnnl.gridappsd.cimhub.components;
-//	----------------------------------------------------------
-//	Copyright (c) 2021-22, Battelle Memorial Institute
-//	All rights reserved.
-//	----------------------------------------------------------
+//  ----------------------------------------------------------
+//  Copyright (c) 2021-22, Battelle Memorial Institute
+//  All rights reserved.
+//  ----------------------------------------------------------
 
 import org.apache.jena.query.*;
 import java.util.HashMap;
+import java.util.StringTokenizer;
 import gov.pnnl.gridappsd.cimhub.CIMTerminal;
 import gov.pnnl.gridappsd.cimhub.components.DistIEEE1547Signal;
 import gov.pnnl.gridappsd.cimhub.components.DistIEEE1547Used;
@@ -13,49 +14,51 @@ import gov.pnnl.gridappsd.cimhub.components.DistSolar;
 import gov.pnnl.gridappsd.cimhub.components.DistStorage;
 
 public class DistIEEE1547Connection extends DistComponent {
-	public String id;
-	public String name;
+  public static final String szCIMClass = "DERIEEEType1";
+
+  public String id;
+  public String name;
   public String pids;
 
-	public String GetJSONEntry () {
-		StringBuilder buf = new StringBuilder ();
+  public String GetJSONEntry () {
+    StringBuilder buf = new StringBuilder ();
 
-		buf.append ("{\"name\":\"" + name +"\"");
-		buf.append("}");
-		return buf.toString();
-	}
+    buf.append ("{\"name\":\"" + name +"\"");
+    buf.append("}");
+    return buf.toString();
+  }
 
-	public DistIEEE1547Connection (ResultSet results) {
-		if (results.hasNext()) {
-			QuerySolution soln = results.next();
-			name = SafeName (soln.get("?name").toString());
-			id = soln.get("?id").toString();
+  public DistIEEE1547Connection (ResultSet results) {
+    if (results.hasNext()) {
+      QuerySolution soln = results.next();
+      id = soln.get("?id").toString();
+      name = PushExportName (soln.get("?name").toString(), id, szCIMClass);
       pids = soln.get("?pids").toString();
       pids = pids.replace ('\n', ':');
-		}		
-	}
-	
-	public String DisplayString() {
-		StringBuilder buf = new StringBuilder ("");
-		buf.append (name);
-		return buf.toString();
-	}
+    }   
+  }
+  
+  public String DisplayString() {
+    StringBuilder buf = new StringBuilder ("");
+    buf.append (name);
+    return buf.toString();
+  }
 
-	public String GetGLM () {
-		StringBuilder buf = new StringBuilder ("object inverter {\n");
-		buf.append ("  name \"inv_" + name + "\";\n");
-		buf.append("}\n");
-		return buf.toString();
-	}
+  public String GetGLM () {
+    StringBuilder buf = new StringBuilder ("object inverter {\n");
+    buf.append ("  name \"inv_" + name + "\";\n");
+    buf.append("}\n");
+    return buf.toString();
+  }
 
-	public String GetKey() {
-		return name;  // need a PID?
-	}
+  public String GetKey() {
+    return id;
+  }
 
-	public String GetDSS (HashMap<String,DistSolar> mapSolars, HashMap<String,DistStorage> mapStorages,
-                        HashMap<String,DistIEEE1547Used> mapUsed,
-                        HashMap<String,DistIEEE1547Signal> mapSignals,
-                        HashMap<String,CIMTerminal> mapTerminals) {
+  public String GetDSS (HashMap<String,DistSolar> mapSolars, HashMap<String,DistStorage> mapStorages,
+            HashMap<String,DistIEEE1547Used> mapUsed,
+            HashMap<String,DistIEEE1547Signal> mapSignals,
+            HashMap<String,CIMTerminal> mapTerminals) {
     boolean bA = false;
     boolean bB = false;
     boolean bC = false;
@@ -144,12 +147,17 @@ public class DistIEEE1547Connection extends DistComponent {
       }
     }
     return buf.toString();
-	}
+  }
 
-  public static String szCSVHeader = "Name,PECs";
+  public static String szCSVHeader = "Name,Inverters";
 
   public String GetCSV () {
-    StringBuilder buf = new StringBuilder (name + "," + pids + "\n");
+    StringBuilder buf = new StringBuilder (name);
+    StringTokenizer st = new StringTokenizer (pids, ":");  
+    while (st.hasMoreTokens()) {
+      buf.append ("," + GetEquipmentExportName(st.nextToken()));
+    }
+    buf.append ("\n");
     return buf.toString();
   }
 }

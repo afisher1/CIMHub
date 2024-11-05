@@ -8,16 +8,18 @@ import org.apache.jena.query.*;
 import java.util.HashMap;
 
 public class DistXfmrTank extends DistComponent {
+  public static final String szCIMClass = "TransformerTanks";
+
   public String id;
-  public String pname;
+  public String name;
+  public String pid;
   public String vgrp;
-  public String tname;
+  public String pname;
   public String tankinfo;
   public String infoid;
   public String[] bus;
   public String[] t1id;
   public String[] orderedPhases;
-  public String[] ename;
   public String[] eid;
   public double[] basev;
   public double[] rg;
@@ -46,7 +48,6 @@ public class DistXfmrTank extends DistComponent {
     bus = new String[size];
     t1id = new String[size];
     orderedPhases = new String[size];
-    ename = new String[size];
     eid = new String[size];
     wdg = new int[size];
     grounded = new boolean[size];
@@ -58,18 +59,16 @@ public class DistXfmrTank extends DistComponent {
   public DistXfmrTank (ResultSet results, HashMap<String,Integer> map) {
     if (results.hasNext()) {
       QuerySolution soln = results.next();
-      pname = SafeName (soln.get("?pname").toString());
       id = soln.get("?id").toString();
+      name = PushExportName (soln.get("?name").toString(), id, szCIMClass);
+      pid = soln.get("?pid").toString();
       infoid = soln.get("?infoid").toString();
       vgrp = soln.get("?vgrp").toString();
-      tname = SafeName (soln.get("?tname").toString());
-      tankinfo = SafeName (soln.get("?xfmrcode").toString());
-      SetSize (map.get(tname));
+      SetSize (map.get(id));
       glmUsed = true;
       for (int i = 0; i < size; i++) {
         eid[i] = soln.get("?eid").toString();
-        ename[i] = SafeName (soln.get("?ename").toString());
-        bus[i] = SafeName (soln.get("?bus").toString());
+        bus[i] = GetBusExportName (soln.get("?bus").toString());
         t1id[i] = soln.get("?t1id").toString();
         basev[i] = Double.parseDouble (soln.get("?basev").toString());
         orderedPhases[i] = soln.get("?orderedPhases").toString();
@@ -84,9 +83,14 @@ public class DistXfmrTank extends DistComponent {
     }   
   }
 
+  public void PrepForExport() {
+    pname = GetEquipmentExportName (pid);
+    tankinfo = GetEquipmentExportName (infoid);
+  }
+
   public String DisplayString() {
     StringBuilder buf = new StringBuilder ("");
-    buf.append ("pname=" + pname + " vgrp=" + vgrp + " tname=" + tname + " tankinfo=" + tankinfo);
+    buf.append ("pname=" + pname + " vgrp=" + vgrp + " name=" + name + " tankinfo=" + tankinfo);
     for (int i = 0; i < size; i++) {
       buf.append ("\n  " + Integer.toString(wdg[i]) + " bus=" + bus[i] + " basev=" + df4.format(basev[i]) + " phs=" + orderedPhases[i]);
       buf.append (" grounded=" + Boolean.toString(grounded[i]) + " rg=" + df4.format(rg[i]) + " xg=" + df4.format(xg[i]));
@@ -95,8 +99,8 @@ public class DistXfmrTank extends DistComponent {
   }
 
   public String GetJSONSymbols(HashMap<String,DistCoordinates> map) {
-    DistCoordinates pt1 = map.get("PowerTransformer:" + pname + ":1");
-    DistCoordinates pt2 = map.get("PowerTransformer:" + pname + ":2");
+    DistCoordinates pt1 = map.get("PowerTransformer:" + pid + ":1");
+    DistCoordinates pt2 = map.get("PowerTransformer:" + pid + ":2");
     if (pt2 == null) { // catches the one-bus, multiphase autotransformer exception
       pt2 = pt1;
     }
@@ -133,7 +137,7 @@ public class DistXfmrTank extends DistComponent {
   public String GetGLM () {
     StringBuilder buf = new StringBuilder ("object transformer {\n");
 
-    buf.append ("  name \"xf_" + pname + "\";\n");
+    buf.append ("  name \"" + GLMObjectPrefix ("xf_") + pname + "\";\n");
     buf.append ("  from \"" + bus[0] + "\";\n");
     buf.append ("  to \"" + bus[1] + "\";\n");
     if (orderedPhases[1].contains("s")) {
@@ -141,7 +145,7 @@ public class DistXfmrTank extends DistComponent {
     } else {
       buf.append("  phases " + PhaseCodeFromOrderedPhases(orderedPhases[0]) + ";\n");
     }
-    buf.append ("  configuration \"xcon_" + PhasedTankName() + "\";\n");
+    buf.append ("  configuration \"" + GLMObjectPrefix ("xcon_") + PhasedTankName() + "\";\n");
     AppendGLMRatings (buf, orderedPhases[0], normalCurrentLimit, emergencyCurrentLimit);
     buf.append ("  // vector group " + vgrp + ";\n");
     buf.append("}\n");
@@ -149,7 +153,7 @@ public class DistXfmrTank extends DistComponent {
   }
 
   public String GetDSS() {
-    StringBuilder buf = new StringBuilder ("new Transformer." + tname + " bank=" + pname + " xfmrcode=" + tankinfo + "\n");
+    StringBuilder buf = new StringBuilder ("new Transformer." + name + " bank=" + pname + " xfmrcode=" + tankinfo + "\n");
 
     // winding ratings
     AppendDSSRatings (buf, normalCurrentLimit, emergencyCurrentLimit);
@@ -159,20 +163,20 @@ public class DistXfmrTank extends DistComponent {
     return buf.toString();
   }
 
-  public static String szCSVHeader = "Name,Wdg1Bus,Phase,Wdg2Bus,Phase,Wdg3Bus,Phase,XfmrCode";
+  public static String szCSVHeader = "Name,Wdg1Bus,Phases,Grnd,Rg,Xg,Wdg2Bus,Phases,Grnd,Rg,Xg,Wdg3Bus,Phases,Grnd,Rg,Xg,XfmrCode,VectorGroup,BankName";
 
   public String GetCSV () {
-    StringBuilder buf = new StringBuilder (tname);
+    StringBuilder buf = new StringBuilder (name);
     for (int i = 0; i < size; i++) {
-      buf.append ("," + bus[i] + "," + CSVPhaseString(orderedPhases[i]));
+      buf.append ("," + bus[i] + "," + orderedPhases[i] + "," + Boolean.toString(grounded[i]) + "," + df3.format(rg[i]) + "," + df3.format(xg[i]));
     }
-    if (size < 3) buf.append (",,");
-    buf.append ("," + tankinfo + "\n");
+    if (size < 3) buf.append (",,,,,");
+    buf.append ("," + tankinfo + "," + vgrp + "," + pname + "\n");
     return buf.toString();
   }
 
   public String GetKey() {
-    return tname;
+    return id;
   }
 }
 

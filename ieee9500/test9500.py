@@ -7,10 +7,20 @@ import subprocess
 import stat
 import shutil
 import os
+import sys
+
+cfg_json = '../queries/cimhubconfig.json'
+
+if sys.platform == 'win32':
+  sh_clean = 'clean.bat'
+  sh_export = 'go.bat'
+  sh_run = 'checkglm.bat'
+else:
+  sh_clean = './clean.sh'
+  sh_export = './go.sh'
+  sh_run = './checkglm.sh'
 
 cwd = os.getcwd()
-
-cfg_json = 'cimhubconfig.json'
 
 cases = []
 
@@ -27,8 +37,21 @@ for froot in ['ieee9500bal', 'ieee9500unbal']:
                       {'dss_link': 'LINE.LN6350537-1', 'dss_bus': 'M1026907', 'gld_link': 'LINE_LN6350537-1', 'gld_bus': 'M1026907'},
                       ]})
 
+import json
+for row in cases:
+  row["inpath_dss"] = "./base"
+  row["dssname"] = row["root"] + ".dss"
+  row["path_xml"] = "./xml/"
+  row["outpath_dss"] = "./dss/"
+  row["outpath_glm"] = "./glm/"
+  row["outpath_csv"] = "./csv/"
+with open('cases.json', 'w') as fp:
+  json.dump(cases, fp, indent=True)
+quit()
+
+
 CIMHubConfig.ConfigFromJsonFile (cfg_json)
-p1 = subprocess.call ('./clean.sh', shell=True)
+p1 = subprocess.call (sh_clean, shell=True)
 cimhub.clear_db (cfg_json)
 
 fp = open ('cim_test.dss', 'w')
@@ -62,11 +85,11 @@ for row in cases:
 #  cmd = 'curl -D- -H "Content-Type: application/xml" --upload-file base/' + row['root']+ '.xml' + ' -X POST ' + CIMHubConfig.blazegraph_url
 #  os.system (cmd)
 
-  shfile = './go.sh'
-  cimhub.make_blazegraph_script (casefiles=[row], xmlpath='base/', dsspath='dss/', glmpath='glm/', scriptname=shfile, csvpath='csv/', clean_dirs=False)
-  st = os.stat (shfile)
-  os.chmod (shfile, st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-  p1 = subprocess.call (shfile, shell=True)
+  cimhub.make_blazegraph_script (casefiles=[row], xmlpath='base/', dsspath='dss/', glmpath='glm/', 
+                                 scriptname=sh_export, csvpath='csv/', clean_dirs=False)
+  st = os.stat (sh_export)
+  os.chmod (sh_export, st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+  p1 = subprocess.call (sh_export, shell=True)
 
   cimhub.make_dssrun_script (casefiles=[row], scriptname='./dss/check.dss', bControls=False, tol=1e-5)
   os.chdir('./dss')
@@ -74,11 +97,10 @@ for row in cases:
   p1.wait()
 
   os.chdir(cwd)
-  shfile = './checkglm.sh'
-  cimhub.make_glmrun_script (casefiles=[row], inpath='glm/', outpath='./', scriptname=shfile)
-  st = os.stat (shfile)
-  os.chmod (shfile, st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-  p1 = subprocess.call (shfile)
+  cimhub.make_glmrun_script (casefiles=[row], inpath='glm/', outpath='./', scriptname=sh_run)
+  st = os.stat (sh_run)
+  os.chmod (sh_run, st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+  p1 = subprocess.call (sh_run)
 
 os.chdir(cwd)
 cimhub.compare_cases (casefiles=cases, basepath='base/', dsspath='dss/', glmpath='glm/')

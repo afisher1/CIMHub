@@ -5,6 +5,22 @@ import os.path
 import cimhub.CIMHubConfig as CIMHubConfig
 import sys
 
+drop_pt_template = """DELETE {{
+ ?m a ?class.
+ ?m c:PositionPoint.Location ?locid.
+ ?m c:PositionPoint.sequenceNumber ?seq.
+ ?m c:PositionPoint.xPosition ?x.
+ ?m c:PositionPoint.yPosition ?y.
+}} WHERE {{
+ VALUES ?locid {{<urn:uuid:{res}>}}
+ VALUES ?class {{c:PositionPoint}}
+ ?m a ?class.
+ ?m c:PositionPoint.Location ?locid.
+ ?m c:PositionPoint.sequenceNumber ?seq.
+ ?m c:PositionPoint.xPosition ?x.
+ ?m c:PositionPoint.yPosition ?y.
+}}"""
+
 drop_loc_template = """DELETE {{
  ?m a ?class.
  ?m c:IdentifiedObject.mRID ?uuid.
@@ -80,10 +96,10 @@ drop_syn_template = """DELETE {{
  ?m c:IdentifiedObject.name ?name.
  ?m c:Equipment.EquipmentContainer ?fdr.
  ?m c:PowerSystemResource.Location ?loc.
- ?m c:SynchronousMachine.p ?p.
- ?m c:SynchronousMachine.q ?q.
- ?m c:SynchronousMachine.ratedS ?S.
- ?m c:SynchronousMachine.ratedU ?U.
+ ?m c:RotatingMachine.p ?p.
+ ?m c:RotatingMachine.q ?q.
+ ?m c:RotatingMachine.ratedS ?S.
+ ?m c:RotatingMachine.ratedU ?U.
 }} WHERE {{
  VALUES ?uuid {{\"{res}\"}}
  VALUES ?class {{c:SynchronousMachine}}
@@ -92,10 +108,10 @@ drop_syn_template = """DELETE {{
  ?m c:IdentifiedObject.name ?name.
  ?m c:Equipment.EquipmentContainer ?fdr.
  ?m c:PowerSystemResource.Location ?loc.
- ?m c:SynchronousMachine.p ?p.
- ?m c:SynchronousMachine.q ?q.
- ?m c:SynchronousMachine.ratedS ?S.
- ?m c:SynchronousMachine.ratedU ?U.
+ ?m c:RotatingMachine.p ?p.
+ ?m c:RotatingMachine.q ?q.
+ ?m c:RotatingMachine.ratedS ?S.
+ ?m c:RotatingMachine.ratedU ?U.
 }}
 """
 
@@ -410,8 +426,9 @@ drop_wattvar_template = """DELETE {{
 }}
 """
 
-def drop_der (cfg_file, uuid_fname):
-  CIMHubConfig.ConfigFromJsonFile (cfg_file)
+def drop_der (uuid_fname, cfg_file=None):
+  if cfg_file is not None:
+    CIMHubConfig.ConfigFromJsonFile (cfg_file)
   sparql = SPARQLWrapper2(CIMHubConfig.blazegraph_url)
   sparql.method = 'POST'
 
@@ -446,6 +463,10 @@ def drop_der (cfg_file, uuid_fname):
     elif cls == 'Terminal':
       qstr = CIMHubConfig.prefix + drop_trm_template.format(res=mRID)
     elif cls == 'Location':
+      qstr = CIMHubConfig.prefix + drop_pt_template.format(res=mRID)
+      sparql.setQuery(qstr)
+      ret = sparql.query()
+      print('deleting', cls+'(PositionPoint)', nm, ret.response.msg)
       qstr = CIMHubConfig.prefix + drop_loc_template.format(res=mRID)
     elif cls == 'PhotovoltaicUnit':
       qstr = CIMHubConfig.prefix + drop_pv_template.format(res=mRID)
@@ -457,6 +478,8 @@ def drop_der (cfg_file, uuid_fname):
       print ('*** ERROR: do not know how to drop SynchronousMachinePhase')
       print ('          (only 3-phase machines are currently supported)')
       exit()
+    else:
+      print ('*** ERROR: do not know how to drop', cls, '(continuing).')
 
     if qstr is not None:
   #    print (qstr)
@@ -469,5 +492,5 @@ def drop_der (cfg_file, uuid_fname):
 if __name__ == '__main__':
   cfg_file = sys.argv[1]
   uuid_fname = sys.argv[2]
-  drop_der (cfg_file, uuid_fname)
+  drop_der (uuid_fname, cfg_file)
 

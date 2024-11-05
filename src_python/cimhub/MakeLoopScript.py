@@ -1,6 +1,8 @@
 import sys
 import os
 import stat
+import shutil
+import cimhub.CIMHubConfig as CIMHubConfig
 
 def append_dss_case(cases, inpath, outpath, fp):
   for row in cases:
@@ -27,74 +29,123 @@ def append_xml_case (cases, xmlpath, outpath, fp):
     print('curl -D- -H "Content-Type: application/xml" --upload-file', xmlpath + c + '.xml', '-X POST $DB_URL', file=fp)
     print('java -cp $CIMHUB_PATH $CIMHUB_PROG -u=$DB_URL -o=both {:s}'.format (opts), outpath + c, file=fp)
 
-def make_blazegraph_script (casefiles, xmlpath, dsspath, glmpath, scriptname, csvpath=None, clean_dirs=True):
-  fp = open (scriptname, 'w')
-  print ('#!/bin/bash', file=fp)
-  print ('source envars.sh', file=fp)
-  if clean_dirs:
-    print ('rm -rf', dsspath, file=fp)
-    print ('rm -rf', glmpath, file=fp)
-  print ('mkdir', dsspath, file=fp)
-  print ('mkdir', glmpath, file=fp)
-  if csvpath is not None:
-    if clean_dirs:
-      print ('rm -rf', csvpath, file=fp)
-    print ('mkdir', csvpath, file=fp)
-  for row in casefiles:
-    if 'export_options' in row:
-      opts = row['export_options']
-    else:
-      opts = ' -l=1.0 -i=1.0'
-    print('curl -D- -X POST $DB_URL --data-urlencode "update=drop all"', file=fp) # print('./drop_all.sh arg', file=fp)
-    print('curl -D- -H "Content-Type: application/xml" --upload-file', 
-          xmlpath + row['root'] + '.xml', '-X POST $DB_URL', file=fp)
-    print('java -cp $CIMHUB_PATH $CIMHUB_PROG -u=$DB_URL -o=dss {:s}'.format (opts), dsspath + row['root'], file=fp)
-    if csvpath is not None:
-      print('java -cp $CIMHUB_PATH $CIMHUB_PROG -u=$DB_URL -o=csv {:s}'.format (opts), csvpath + row['root'], file=fp)
-    if 'skip_gld' in row:
-      if row['skip_gld']:
-        continue
-    print('java -cp $CIMHUB_PATH $CIMHUB_PROG -u=$DB_URL -o=glm {:s}'.format (opts), glmpath + row['root'], file=fp)
-  fp.close()
-
-def make_export_script (scriptname, cases, dsspath=None, glmpath=None, csvpath=None, clean_dirs=True):
-  fp = open (scriptname, 'w')
-  print ('#!/bin/bash', file=fp)
-  print ('source envars.sh', file=fp)
-  for outpath in [dsspath, glmpath, csvpath]:
-    if outpath is not None:
-      if clean_dirs:
-        print ('rm -rf', outpath, file=fp)
-      print ('mkdir', outpath, file=fp)
+def append_xml_case_windows (cases, xmlpath, outpath, fp):
   for row in cases:
+    c = row['file']
+    opts = row['opts']
+    print('curl -D- -X POST %DB_URL% --data-urlencode "update=drop all"', file=fp)
+    print('curl -D- -H "Content-Type: application/xml" --upload-file', xmlpath + c + '.xml', '-X POST %DB_URL%', file=fp)
+    print('java -cp %CIMHUB_PATH% %CIMHUB_PROG% -u=%DB_URL% -o=both {:s}'.format (opts), outpath + c, file=fp)
+
+def append_cimhub_envars (fp, bWindows):
+  if bWindows:
+    print ('echo off', file=fp)
+    print ('set DB_URL="{:s}"'.format (CIMHubConfig.DB_URL), file=fp)
+    print ('set CIMHUB_PATH="{:s}"'.format (CIMHubConfig.CIMHUB_PATH), file=fp)
+    print ('set CIMHUB_PROG="{:s}"'.format (CIMHubConfig.CIMHUB_PROG), file=fp)
+  else:
+    print ('#!/bin/bash', file=fp)
+    print ('declare -r DB_URL="{:s}"'.format (CIMHubConfig.DB_URL), file=fp)
+    print ('declare -r CIMHUB_PATH="{:s}"'.format (CIMHubConfig.CIMHUB_PATH), file=fp)
+    print ('declare -r CIMHUB_PROG="{:s}"'.format (CIMHubConfig.CIMHUB_PROG), file=fp)
+    
+def make_upload_script (cases, scriptname, bClearDB=True):
+  fp = open (scriptname, 'w')
+  bWindows = scriptname.endswith('.bat')
+  if bWindows:
+    db_string = '%DB_URL%'
+  else:
+    db_string = '$DB_URL'
+  append_cimhub_envars (fp, bWindows)
+  if bClearDB:
+    print('curl -D- -X POST', db_string, '--data-urlencode "update=drop all"', file=fp)
+  for row in cases:
+    print('curl -D- -H "Content-Type: application/xml" --upload-file', 
+          row['path_xml'] + row['root'] + '.xml', '-X POST', db_string, file=fp)
+  fp.close()
+  st = os.stat (scriptname)
+  os.chmod (scriptname, st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+def get_actual_directory (row, key):
+  if key in row:
+    val = row[key]
+    if val is not None:
+      if len(val) > 0:
+        return os.path.abspath(val)
+  return None
+
+def make_export_script (cases, scriptname, bClearOutput=True):
+  fp = open (scriptname, 'w')
+  bWindows = scriptname.endswith('.bat')
+  if bWindows:
+    cp_string = '%CIMHUB_PATH% %CIMHUB_PROG% -u=%DB_URL%'
+  else:
+    cp_string = '$CIMHUB_PATH $CIMHUB_PROG -u=$DB_URL'
+  append_cimhub_envars (fp, bWindows)
+  outdirs = []
+  for row in cases:
+    for key in ['outpath_glm', 'outpath_dss', 'outpath_csv']:
+      if key in row:
+        outdir = get_actual_directory (row, key)
+        if outdir is not None:
+          if outdir not in outdirs:
+            outdirs.append(outdir)
+  if bClearOutput:
+    for outdir in outdirs:
+      if os.path.exists(outdir):
+        shutil.rmtree (outdir)
+  for outdir in outdirs:
+    if not os.path.exists(outdir):
+      os.mkdir(outdir)
+  for row in cases:
+    dsspath = None
+    glmpath = None
+    csvpath = None
+    opts = ''
+    if ('mRID' in row) and (len(row['mRID']) > 0):
+      opts += ' -s={:s}'.format(row['mRID'])
     if 'export_options' in row:
-      opts = row['export_options']
+      opts += row['export_options']
     else:
-      opts = ' -l=1.0 -i=1.0'
+      opts += ' -l=1.0 -i=1.0'
+    dsspath = get_actual_directory (row, 'outpath_dss')
+    glmpath = get_actual_directory (row, 'outpath_glm')
+    csvpath = get_actual_directory (row, 'outpath_csv')
     if dsspath is not None:
-      print('java -cp $CIMHUB_PATH $CIMHUB_PROG -u=$DB_URL -o=dss {:s}'.format (opts), dsspath + row['root'], file=fp)
+      print('java -cp', cp_string, '-o=dss {:s}'.format (opts), os.path.join (dsspath, row['root']), file=fp)
     if csvpath is not None:
-      print('java -cp $CIMHUB_PATH $CIMHUB_PROG -u=$DB_URL -o=csv {:s}'.format (opts), csvpath + row['root'], file=fp)
+      print('java -cp', cp_string, '-o=csv {:s}'.format (opts), os.path.join (csvpath, row['root']), file=fp)
     if glmpath is not None:
       if 'skip_gld' in row:
         if row['skip_gld']:
           continue
-      print('java -cp $CIMHUB_PATH $CIMHUB_PROG -u=$DB_URL -o=glm {:s}'.format (opts), glmpath + row['root'], file=fp)
+      print('java -cp', cp_string, '-o=glm {:s}'.format (opts), os.path.join (glmpath, row['root']), file=fp)
   fp.close()
+  st = os.stat (scriptname)
+  os.chmod (scriptname, st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
-def make_dssrun_script (casefiles, scriptname, bControls=False, tol=1e-8):
+def make_dssrun_script (cases, scriptname, bControls=False):
   fp = open (scriptname, 'w')
-#  print('cd', dsspath, file=fp)
-  for row in casefiles:
+  for row in cases:
+    bControls = False
+    if 'dss_controls' in row:
+      if row['dss_controls'] == True:
+        bControls = True
+    if 'dss_tolerance' in row:
+      tol = float(row['dss_tolerance'])
+    else:
+      tol = 1e-8
     c = row['root']
+    dsspath = os.path.abspath(row['outpath_dss'])
     print('//', file=fp)
+    print('cd', dsspath, file=fp)
     print('clear', file=fp)
     print('redirect', c + '_base.dss', file=fp)
     print('set maxiterations=80', file=fp)
     print('set tolerance={:g}'.format(tol), file=fp)
     if bControls:
       print('set controlmode=static', file=fp)
-      print('set maxcontroliter=100', file=fp)
+      print('set maxcontroliter=200', file=fp)
     else:
       print('set controlmode=off', file=fp)
     print('solve', file=fp)
@@ -133,20 +184,37 @@ if __name__ == '__main__':
   ]
 
   if arg == '-b':
-    fp = open ('convert_xml.sh', 'w')
-    print ('#!/bin/bash', file=fp)
-    print ('source envars.sh', file=fp)
-    print ('rm -rf', dsspath, file=fp)
-    print ('rm -rf', glmpath, file=fp)
-    print ('rm -rf', bothpath, file=fp)
-    print ('mkdir', dsspath, file=fp)
-    print ('mkdir', glmpath, file=fp)
-    print ('mkdir', bothpath, file=fp)
-    append_xml_case (casefiles, xmlpath, bothpath, fp)
-    print ('', file=fp)
-    fp.close()
-    st = os.stat ('convert_xml.sh')
-    os.chmod ('convert_xml.sh', st.st_mode | stat.S_IEXEC)
+    if sys.platform == 'win32':
+      dsspath = dsspath.replace ('/', '\\')
+      glmpath = glmpath.replace ('/', '\\')
+      bothpath = bothpath.replace ('/', '\\')
+      xmlpath = xmlpath.replace ('/', '\\')
+      fp = open ('convert_xml.bat', 'w')
+      print ('call envars.bat', file=fp)
+      print ('rd /s /q', dsspath, file=fp)
+      print ('rd /s /q', glmpath, file=fp)
+      print ('rd /s /q', bothpath, file=fp)
+      print ('md', dsspath, file=fp)
+      print ('md', glmpath, file=fp)
+      print ('md', bothpath, file=fp)
+      append_xml_case_windows (casefiles, xmlpath, bothpath, fp)
+      print ('', file=fp)
+      fp.close()
+    else:
+      fp = open ('convert_xml.sh', 'w')
+      print ('#!/bin/bash', file=fp)
+      print ('source envars.sh', file=fp)
+      print ('rm -rf', dsspath, file=fp)
+      print ('rm -rf', glmpath, file=fp)
+      print ('rm -rf', bothpath, file=fp)
+      print ('mkdir', dsspath, file=fp)
+      print ('mkdir', glmpath, file=fp)
+      print ('mkdir', bothpath, file=fp)
+      append_xml_case (casefiles, xmlpath, bothpath, fp)
+      print ('', file=fp)
+      fp.close()
+      st = os.stat ('convert_xml.sh')
+      os.chmod ('convert_xml.sh', st.st_mode | stat.S_IEXEC)
 
   if arg == '-d':
     fp = open ('check.dss', 'w')
